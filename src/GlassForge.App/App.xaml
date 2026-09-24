@@ -1,0 +1,29 @@
+<Application x:Class="GlassForge.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             ShutdownMode="OnExplicitShutdown">
+  <Application.Resources>
+    <SolidColorBrush x:Key="PageBrush" Color="#101014" />
+    <SolidColorBrush x:Key="PanelBrush" Color="#19191F" />
+    <SolidColorBrush x:Key="RaisedBrush" Color="#22222A" />
+    <SolidColorBrush x:Key="TextBrush" Color="#F4F2F8" />
+    <SolidColorBrush x:Key="MutedBrush" Color="#A9A4B2" />
+    <SolidColorBrush x:Key="AccentBrush" Color="#8B5CF6" />
+    <SolidColorBrush x:Key="BorderBrush" Color="#34323D" />
+    <Style TargetType="TextBlock"><Setter Property="Foreground" Value="{StaticResource TextBrush}" /></Style>
+    <Style TargetType="Button">
+      <Setter Property="Foreground" Value="White"/><Setter Property="Background" Value="{StaticResource RaisedBrush}"/>
+      <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/><Setter Property="Padding" Value="14,8"/>
+      <Setter Property="Margin" Value="4"/><Setter Property="Cursor" Value="Hand"/>
+    </Style>
+    <Style TargetType="TextBox">
+      <Setter Property="Foreground" Value="{StaticResource TextBrush}"/><Setter Property="Background" Value="{StaticResource RaisedBrush}"/>
+      <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/><Setter Property="Padding" Value="8"/>
+    </Style>
+    <Style TargetType="ListBox">
+      <Setter Property="Foreground" Value="{StaticResource TextBrush}"/><Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderThickness" Value="0"/>
+    </Style>
+  </Application.Resources>
+</Application>
+

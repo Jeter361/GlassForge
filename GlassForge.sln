@@ -1,0 +1,36 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{70CCB748-00EA-454D-B624-4470E600ECFC}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GlassForge.App", "src\GlassForge.App\GlassForge.App.csproj", "{F50E9C7E-860C-432D-AC88-E4CEEA568FBF}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{9D3F7EEA-E5FD-471E-942D-AD1107BD4F7B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GlassForge.Tests", "tests\GlassForge.Tests\GlassForge.Tests.csproj", "{F2418FD8-0CEF-4150-AD79-F6CC35DF9667}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{F50E9C7E-860C-432D-AC88-E4CEEA568FBF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F50E9C7E-860C-432D-AC88-E4CEEA568FBF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F50E9C7E-860C-432D-AC88-E4CEEA568FBF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F50E9C7E-860C-432D-AC88-E4CEEA568FBF}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F2418FD8-0CEF-4150-AD79-F6CC35DF9667}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F2418FD8-0CEF-4150-AD79-F6CC35DF9667}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F2418FD8-0CEF-4150-AD79-F6CC35DF9667}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F2418FD8-0CEF-4150-AD79-F6CC35DF9667}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{F50E9C7E-860C-432D-AC88-E4CEEA568FBF} = {70CCB748-00EA-454D-B624-4470E600ECFC}
+		{F2418FD8-0CEF-4150-AD79-F6CC35DF9667} = {9D3F7EEA-E5FD-471E-942D-AD1107BD4F7B}
+	EndGlobalSection
+EndGlobal
