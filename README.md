@@ -14,6 +14,8 @@ The current foundation is based on working Teams, Outlook, and Word PowerShell p
 
 The beta isn't code-signed yet, so Windows SmartScreen may warn you the first time. Click **More info → Run anyway**.
 
+**Updating:** just run the new `GlassForge.exe`. It closes any older copy that's still running, restores that copy's windows, and takes over its launch-at-startup entry.
+
 ## Screenshots
 
 Tune tint color and opacity live, with changes applied to the target app instantly:

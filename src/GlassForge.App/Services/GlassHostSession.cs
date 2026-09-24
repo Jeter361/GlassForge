@@ -69,6 +69,8 @@ internal sealed class GlassHostForm : System.Windows.Forms.Form
     private nint _foregroundHook;
     private readonly NativeMethods.WinEventProc _lifecycleCallback;
     private readonly List<nint> _lifecycleHooks = [];
+    private HashSet<uint> _processIds = [];
+    private bool _discoveryQueued;
     private nint _target;
     private NativeMethods.Rect _lastRect;
     private bool _hasLastRect;
@@ -170,7 +172,7 @@ internal sealed class GlassHostForm : System.Windows.Forms.Form
 
     private void DiscoverTarget()
     {
-        _target = WindowDiscoveryService.FindLargestWindow(_profile.ProcessName);
+        _target = WindowDiscoveryService.FindLargestWindow(_profile.ProcessName, out _processIds);
         _mediaPlaying = _profile.PauseWhileMediaPlays && MediaPlaybackMonitor.IsPlaying(_profile.ProcessName);
         if (_target == nint.Zero) { Hide(); return; }
         if (NativeMethods.GetWindowRect(_target, out var windowRect)
@@ -198,12 +200,26 @@ internal sealed class GlassHostForm : System.Windows.Forms.Form
     // next discovery tick leaves a lone glass panel on screen for up to a second (Chromium hides before destroying).
     private void OnLifecycleChanged(nint hook, uint eventType, nint window, int objectId, int childId, uint threadId, uint eventTime)
     {
-        if (window != _target || objectId != NativeMethods.ObjidWindow) return;
-        if (eventType is NativeMethods.EventObjectDestroy or NativeMethods.EventObjectHide
-            or NativeMethods.EventObjectCloaked or NativeMethods.EventSystemMinimizeStart)
-            HideBackdrop();
-        else
-            Align(true);
+        if (objectId != NativeMethods.ObjidWindow) return;
+        var disappearing = eventType is NativeMethods.EventObjectDestroy or NativeMethods.EventObjectHide
+            or NativeMethods.EventObjectCloaked or NativeMethods.EventSystemMinimizeStart;
+        if (window == _target)
+        {
+            if (disappearing) HideBackdrop(); else Align(true);
+            return;
+        }
+        // Another window of the same app appeared or was restored: re-pick the target now rather than
+        // on the next discovery tick, so new and restored windows get their glass without a delay.
+        // Tooltips and menus fire bursts of these; coalesce each burst into one discovery pass.
+        if (!disappearing && !_discoveryQueued && NativeMethods.GetWindowThreadProcessId(window, out var processId) != 0 && _processIds.Contains(processId))
+        {
+            _discoveryQueued = true;
+            BeginInvoke(() =>
+            {
+                _discoveryQueued = false;
+                DiscoverTarget();
+            });
+        }
     }
 
     private void HideBackdrop()

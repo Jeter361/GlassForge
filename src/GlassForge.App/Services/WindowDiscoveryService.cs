@@ -42,16 +42,18 @@ public sealed class WindowDiscoveryService
         return results.Values.OrderBy(app => app.DisplayName).ToArray();
     }
 
-    internal static nint FindLargestWindow(string processName)
+    internal static nint FindLargestWindow(string processName) => FindLargestWindow(processName, out _);
+
+    internal static nint FindLargestWindow(string processName, out HashSet<uint> processIds)
     {
-        var processIds = Process.GetProcessesByName(processName).Select(process => (uint)process.Id).ToHashSet();
+        var ids = processIds = Process.GetProcessesByName(processName).Select(process => (uint)process.Id).ToHashSet();
         nint best = nint.Zero;
         long bestArea = 0;
         NativeMethods.EnumWindows((window, _) =>
         {
             if (!NativeMethods.IsWindowVisible(window)) return true;
             NativeMethods.GetWindowThreadProcessId(window, out var processId);
-            if (!processIds.Contains(processId)) return true;
+            if (!ids.Contains(processId)) return true;
             if (!IsUserVisible(window)) return true;
             if (!NativeMethods.GetWindowRect(window, out var rect)) return true;
             var area = (long)(rect.Right - rect.Left) * (rect.Bottom - rect.Top);

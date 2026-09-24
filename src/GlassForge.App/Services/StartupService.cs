@@ -16,6 +16,19 @@ public static class StartupService
         }
     }
 
+    /// <summary>Points an existing startup entry at this executable, so an older copy doesn't come back at sign-in.</summary>
+    public static void RepointIfStale()
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(KeyPath, false);
+            if (key?.GetValue(ValueName) is not string command || Environment.ProcessPath is not { } executable) return;
+            if (!command.Contains(executable, StringComparison.OrdinalIgnoreCase)) SetEnabled(true);
+        }
+        catch (System.Security.SecurityException) { }
+        catch (UnauthorizedAccessException) { }
+    }
+
     public static void SetEnabled(bool enabled)
     {
         using var key = Registry.CurrentUser.CreateSubKey(KeyPath, true);

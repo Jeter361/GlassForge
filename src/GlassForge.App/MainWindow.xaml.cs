@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Drawing;
 using System.Windows;
@@ -221,7 +221,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         // WindowChrome windows overhang the monitor by the resize border when maximized.
         var maximized = WindowState == WindowState.Maximized;
         RootGrid.Margin = maximized ? new Thickness(7) : new Thickness(0);
-        MaximizeGlyph.Text = maximized ? "" : "";
+        MaximizeGlyph.Text = maximized ? "î¤£" : "î¤¢";
     }
 
     protected override void OnClosing(CancelEventArgs e)
@@ -246,7 +246,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         Activate();
     }
 
-    private void ExitApplication()
+    internal void ExitApplication()
     {
         _reallyClose = true;
         Close();
