@@ -40,5 +40,47 @@
         </Trigger>
       </Style.Triggers>
     </Style>
+    <ControlTemplate x:Key="GlassSliderThumb" TargetType="Thumb">
+      <Grid Width="16" Height="16">
+        <Ellipse x:Name="Glow" Fill="#408B5CF6" Width="16" Height="16"/>
+        <Ellipse x:Name="Core" Fill="#A78BFA" Stroke="#EDE9FE" StrokeThickness="1.2" Width="11" Height="11"/>
+      </Grid>
+      <ControlTemplate.Triggers>
+        <Trigger Property="IsMouseOver" Value="True">
+          <Setter TargetName="Glow" Property="Fill" Value="#708B5CF6"/>
+          <Setter TargetName="Core" Property="Fill" Value="#C4B5FD"/>
+          <Setter TargetName="Core" Property="Width" Value="13"/>
+          <Setter TargetName="Core" Property="Height" Value="13"/>
+        </Trigger>
+        <Trigger Property="IsDragging" Value="True">
+          <Setter TargetName="Glow" Property="Fill" Value="#A08B5CF6"/>
+          <Setter TargetName="Core" Property="Fill" Value="#FFFFFF"/>
+        </Trigger>
+      </ControlTemplate.Triggers>
+    </ControlTemplate>
+    <Style TargetType="Slider">
+      <Setter Property="Height" Value="26"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Slider">
+            <Grid Height="26" VerticalAlignment="Center">
+              <Border Height="5" VerticalAlignment="Center" Background="#55101016" BorderBrush="#604A4654" BorderThickness="1" CornerRadius="3"/>
+              <Track x:Name="PART_Track" VerticalAlignment="Center" Minimum="{TemplateBinding Minimum}" Maximum="{TemplateBinding Maximum}" Value="{TemplateBinding Value}">
+                <Track.DecreaseRepeatButton>
+                  <RepeatButton Command="Slider.DecreaseLarge" IsTabStop="False">
+                    <RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Height="5" Background="{StaticResource AccentBrush}" CornerRadius="3,0,0,3"/></ControlTemplate></RepeatButton.Template>
+                  </RepeatButton>
+                </Track.DecreaseRepeatButton>
+                <Track.IncreaseRepeatButton>
+                  <RepeatButton Command="Slider.IncreaseLarge" IsTabStop="False" Background="Transparent" BorderThickness="0"/>
+                </Track.IncreaseRepeatButton>
+                <Track.Thumb><Thumb Template="{StaticResource GlassSliderThumb}"/></Track.Thumb>
+              </Track>
+            </Grid>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
   </Application.Resources>
 </Application>
