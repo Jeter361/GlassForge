@@ -8,6 +8,12 @@ The current foundation is based on working Teams, Outlook, and Word PowerShell p
 
 ![GlassForge applying frosted glass to Chrome](docs/Images/glassforge-demo.gif)
 
+## Download
+
+**[⬇ Download the latest GlassForge.exe](../../releases/latest)** — one self-contained file for Windows 10/11 x64. No installer and no .NET install required.
+
+The beta isn't code-signed yet, so Windows SmartScreen may warn you the first time. Click **More info → Run anyway**.
+
 ## Screenshots
 
 Tune tint color and opacity live, with changes applied to the target app instantly:
@@ -36,7 +42,7 @@ Tune tint color and opacity live, with changes applied to the target app instant
 ## Requirements
 
 - Windows 11 is recommended.
-- .NET 8 Desktop Runtime for normal use.
+- Nothing extra for normal use; the release `.exe` bundles the .NET runtime.
 - .NET 8 SDK for development.
 - The target app and GlassForge should run at the same integrity level.
 
