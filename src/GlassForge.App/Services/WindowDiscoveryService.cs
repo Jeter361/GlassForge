@@ -16,18 +16,23 @@ public sealed class WindowDiscoveryService
             NativeMethods.GetWindowThreadProcessId(window, out var processId);
             var title = new StringBuilder(512);
             NativeMethods.GetWindowText(window, title, title.Capacity);
-            if (title.Length == 0) return true;
+            if (!NativeMethods.GetWindowRect(window, out var rect)) return true;
+            if (rect.Right <= rect.Left || rect.Bottom <= rect.Top) return true;
 
             try
             {
                 using var process = Process.GetProcessById((int)processId);
                 var name = process.ProcessName;
                 if (string.Equals(name, "GlassForge", StringComparison.OrdinalIgnoreCase)) return true;
+                var windowTitle = title.ToString();
+                var displayName = !string.IsNullOrWhiteSpace(process.MainWindowTitle)
+                    ? process.MainWindowTitle
+                    : !string.IsNullOrWhiteSpace(windowTitle) ? windowTitle : name;
                 results.TryAdd(name, new RunningApplication(
-                    string.IsNullOrWhiteSpace(process.MainWindowTitle) ? name : process.MainWindowTitle,
+                    displayName,
                     name,
                     process.Id,
-                    title.ToString()));
+                    windowTitle));
             }
             catch (ArgumentException) { }
             catch (InvalidOperationException) { }
@@ -59,4 +64,3 @@ public sealed class WindowDiscoveryService
         return best;
     }
 }
-

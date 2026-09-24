@@ -95,6 +95,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         Profiles.Remove(remove);
         SelectedProfile = Profiles.FirstOrDefault();
         SaveProfiles();
+        RefreshRunningApplications();
+        StatusText.Text = $"Removed {remove.DisplayName}; its original window style was restored";
     }
 
     private void StartupChanged(object sender, RoutedEventArgs e)

@@ -43,7 +43,15 @@ internal sealed class GlassHostSession : IDisposable
     {
         var form = _form;
         if (form is null || form.IsDisposed) return;
-        try { form.BeginInvoke(form.Close); } catch (InvalidOperationException) { }
+        try
+        {
+            if (form.IsHandleCreated && form.InvokeRequired)
+                form.Invoke(new Action(form.Close));
+            else
+                form.Close();
+            _thread?.Join(2000);
+        }
+        catch (InvalidOperationException) { }
     }
 }
 
