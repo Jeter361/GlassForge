@@ -10,7 +10,7 @@ The current foundation is based on working Teams, Outlook, and Word PowerShell p
 
 ## Download
 
-**[⬇ Download the latest GlassForge.exe](../../releases/latest)** — one self-contained file for Windows 10/11 x64. No installer and no .NET install required.
+**[⬇ Download the latest GlassForge.exe](../../releases/latest)** — one self-contained file for Windows 10/11 x64. No installer and no .NET install required. GlassForge is open source under the MIT license, so you can also build it yourself (see [Build and run](#build-and-run)).
 
 The beta isn't code-signed yet, so Windows SmartScreen may warn you the first time. Click **More info → Run anyway**.
 
@@ -38,6 +38,9 @@ Tune tint color and opacity live, with changes applied to the target app instant
 - Run multiple independent profiles.
 - Minimize to the notification area.
 - Start silently with Windows through the current-user Run key.
+- Go solid automatically while a target is fullscreen (video, games, slideshows).
+- Optionally go solid while the target app plays media, per profile ("Pause while media plays").
+- Allow only one running instance, and restore any windows left translucent by a crash on the next launch.
 
 ## Requirements
 
