@@ -52,6 +52,7 @@ public sealed class WindowDiscoveryService
             if (!NativeMethods.IsWindowVisible(window)) return true;
             NativeMethods.GetWindowThreadProcessId(window, out var processId);
             if (!processIds.Contains(processId)) return true;
+            if (!IsUserVisible(window)) return true;
             if (!NativeMethods.GetWindowRect(window, out var rect)) return true;
             var area = (long)(rect.Right - rect.Left) * (rect.Bottom - rect.Top);
             if (area > bestArea)
@@ -62,5 +63,13 @@ public sealed class WindowDiscoveryService
             return true;
         }, nint.Zero);
         return best;
+    }
+
+    // IsWindowVisible is true for cloaked windows (other virtual desktops, suspended UWP and Chromium frames)
+    // and for tool windows; backing either leaves a glass panel with nothing in front of it.
+    private static bool IsUserVisible(nint window)
+    {
+        if ((NativeMethods.GetWindowLongPtr(window, NativeMethods.GwlExStyle).ToInt64() & NativeMethods.WsExToolWindow) != 0) return false;
+        return NativeMethods.DwmGetWindowAttribute(window, NativeMethods.DwmwaCloaked, out int cloaked, sizeof(int)) != 0 || cloaked == 0;
     }
 }

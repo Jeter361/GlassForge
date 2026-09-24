@@ -31,7 +31,9 @@ internal sealed class GlassHostSession : IDisposable
     {
         _thread = new Thread(() =>
         {
-            NativeMethods.SetProcessDpiAwarenessContext(new nint(-4));
+            // WPF fixes the process DPI mode before this runs, so opt this thread in instead;
+            // otherwise mixed-scaling setups get virtualized coordinates and a misplaced backdrop.
+            NativeMethods.SetThreadDpiAwarenessContext(NativeMethods.DpiAwarenessContextPerMonitorAwareV2);
             System.Windows.Forms.Application.EnableVisualStyles();
             _form = new GlassHostForm(_profile);
             System.Windows.Forms.Application.Run(_form);
@@ -102,6 +104,17 @@ internal sealed class GlassHostForm : System.Windows.Forms.Form
 
     protected override void OnPaintBackground(System.Windows.Forms.PaintEventArgs e) { }
 
+    // The host's bounds always come from the target; don't let WinForms rescale it when it crosses monitors.
+    protected override void WndProc(ref System.Windows.Forms.Message m)
+    {
+        if (m.Msg == NativeMethods.WmDpiChanged)
+        {
+            Align(true);
+            return;
+        }
+        base.WndProc(ref m);
+    }
+
     private void OnShown(object? sender, EventArgs e)
     {
         EnableAcrylic();
@@ -150,7 +163,7 @@ internal sealed class GlassHostForm : System.Windows.Forms.Form
         _mediaPlaying = _profile.PauseWhileMediaPlays && MediaPlaybackMonitor.IsPlaying(_profile.ProcessName);
         if (_target == nint.Zero) { Hide(); return; }
         if (NativeMethods.GetWindowRect(_target, out var windowRect)
-            && NativeMethods.DwmGetWindowAttribute(_target, NativeMethods.DwmwaExtendedFrameBounds, out var frameRect, Marshal.SizeOf<NativeMethods.Rect>()) == 0)
+            && NativeMethods.DwmGetWindowAttribute(_target, NativeMethods.DwmwaExtendedFrameBounds, out NativeMethods.Rect frameRect, Marshal.SizeOf<NativeMethods.Rect>()) == 0)
         {
             _insetLeft = frameRect.Left - windowRect.Left;
             _insetTop = frameRect.Top - windowRect.Top;

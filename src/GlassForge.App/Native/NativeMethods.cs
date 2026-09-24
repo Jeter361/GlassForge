@@ -47,6 +47,10 @@ internal static class NativeMethods
     internal const long WsExLayered = 0x00080000;
     internal const uint LwaAlpha = 2;
     internal const int DwmwaExtendedFrameBounds = 9;
+    internal const int DwmwaCloaked = 14;
+    internal const long WsExToolWindow = 0x00000080;
+    internal const int WmDpiChanged = 0x02E0;
+    internal static readonly nint DpiAwarenessContextPerMonitorAwareV2 = new(-4);
     internal const int DwmwaUseHostBackdropBrush = 17;
     internal const int DwmwaWindowCornerPreference = 33;
     internal const int AccentEnableAcrylicBlurBehind = 4;
@@ -72,6 +76,8 @@ internal static class NativeMethods
     [DllImport("user32.dll")] internal static extern nint SetWinEventHook(uint eventMin, uint eventMax, nint module, WinEventProc callback, uint processId, uint threadId, uint flags);
     [DllImport("user32.dll")] internal static extern bool UnhookWinEvent(nint hook);
     [DllImport("user32.dll")] internal static extern bool SetProcessDpiAwarenessContext(nint value);
+    [DllImport("user32.dll")] internal static extern nint SetThreadDpiAwarenessContext(nint value);
+    [DllImport("dwmapi.dll")] internal static extern int DwmGetWindowAttribute(nint window, int attribute, out int value, int size);
     [DllImport("dwmapi.dll")] internal static extern int DwmGetWindowAttribute(nint window, int attribute, out Rect value, int size);
     [DllImport("dwmapi.dll")] internal static extern int DwmSetWindowAttribute(nint window, int attribute, ref int value, int size);
 
