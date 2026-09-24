@@ -26,6 +26,8 @@ public sealed class AppProfile : INotifyPropertyChanged
     public string TintColor { get => _tintColor; set => Set(ref _tintColor, value.Trim().TrimStart('#').ToUpperInvariant()); }
 
     [JsonIgnore] public string OpacityLabel => $"{Math.Round(WindowOpacity / 255d * 100)}%";
+    [JsonIgnore] public string Initial => string.IsNullOrWhiteSpace(DisplayName) ? "?" : DisplayName.TrimStart()[..1].ToUpperInvariant();
+    [JsonIgnore] public string TintHex => $"#{TintColor}";
     [JsonIgnore] public string TintLabel => $"{Math.Round(TintOpacity / 255d * 100)}%";
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -43,5 +45,7 @@ public sealed class AppProfile : INotifyPropertyChanged
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(property));
         if (property == nameof(WindowOpacity)) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(OpacityLabel)));
         if (property == nameof(TintOpacity)) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(TintLabel)));
+        if (property == nameof(DisplayName)) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Initial)));
+        if (property == nameof(TintColor)) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(TintHex)));
     }
 }

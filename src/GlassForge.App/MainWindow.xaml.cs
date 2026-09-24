@@ -209,6 +209,21 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void SaveProfiles() => _store.Save(Profiles);
 
+    private void MinimizeClicked(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
+
+    private void MaximizeClicked(object sender, RoutedEventArgs e)
+        => WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+
+    private void CloseClicked(object sender, RoutedEventArgs e) => Close();
+
+    private void WindowStateChanged(object? sender, EventArgs e)
+    {
+        // WindowChrome windows overhang the monitor by the resize border when maximized.
+        var maximized = WindowState == WindowState.Maximized;
+        RootGrid.Margin = maximized ? new Thickness(7) : new Thickness(0);
+        MaximizeGlyph.Text = maximized ? "" : "";
+    }
+
     protected override void OnClosing(CancelEventArgs e)
     {
         if (!_reallyClose)
