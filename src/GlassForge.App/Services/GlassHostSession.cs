@@ -60,6 +60,7 @@ internal sealed class GlassHostForm : System.Windows.Forms.Form
     private NativeMethods.Rect _lastRect;
     private bool _hasLastRect;
     private int _insetLeft, _insetTop, _insetRight, _insetBottom;
+    private readonly Dictionary<nint, nint> _originalStyles = [];
 
     protected override System.Windows.Forms.CreateParams CreateParams
     {
@@ -171,7 +172,9 @@ internal sealed class GlassHostForm : System.Windows.Forms.Form
         var height = rect.Bottom - rect.Top;
         if (width <= 0 || height <= 0) { Hide(); return; }
 
-        var style = NativeMethods.GetWindowLongPtr(_target, NativeMethods.GwlExStyle).ToInt64();
+        var currentStyle = NativeMethods.GetWindowLongPtr(_target, NativeMethods.GwlExStyle);
+        _originalStyles.TryAdd(_target, currentStyle);
+        var style = currentStyle.ToInt64();
         NativeMethods.SetWindowLongPtr(_target, NativeMethods.GwlExStyle, new nint(style | NativeMethods.WsExLayered));
         NativeMethods.SetLayeredWindowAttributes(_target, 0, _profile.WindowOpacity, NativeMethods.LwaAlpha);
         if (!Visible) Show();
@@ -185,7 +188,18 @@ internal sealed class GlassHostForm : System.Windows.Forms.Form
     {
         if (_locationHook != nint.Zero) NativeMethods.UnhookWinEvent(_locationHook);
         if (_foregroundHook != nint.Zero) NativeMethods.UnhookWinEvent(_foregroundHook);
-        if (disposing) { _discoveryTimer.Dispose(); _trackingTimer.Dispose(); }
+        if (disposing)
+        {
+            _discoveryTimer.Dispose();
+            _trackingTimer.Dispose();
+            foreach (var (window, originalStyle) in _originalStyles)
+            {
+                if (!NativeMethods.IsWindow(window)) continue;
+                NativeMethods.SetLayeredWindowAttributes(window, 0, 255, NativeMethods.LwaAlpha);
+                NativeMethods.SetWindowLongPtr(window, NativeMethods.GwlExStyle, originalStyle);
+            }
+            _originalStyles.Clear();
+        }
         base.Dispose(disposing);
     }
 }
