@@ -1,0 +1,42 @@
+name: Bug report
+description: Something looks wrong or doesn't work with a target app
+labels: [bug, beta]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you saw vs. what you expected. Screenshots or a short clip help a lot.
+    validations:
+      required: true
+  - type: input
+    id: app
+    attributes:
+      label: Target app and version
+      placeholder: e.g. Microsoft Teams (new) 25xxx, Outlook classic 2508
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version / build
+      placeholder: e.g. Windows 11 24H2, build 26100.xxxx (run `winver`)
+    validations:
+      required: true
+  - type: input
+    id: display
+    attributes:
+      label: Monitors, scaling, and GPU
+      placeholder: e.g. 2 monitors, 150% + 100%, RTX 3070
+  - type: input
+    id: settings
+    attributes:
+      label: Profile settings
+      placeholder: opacity, tint strength, tint color
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Create a profile for ...
+        2. Drag the window to ...

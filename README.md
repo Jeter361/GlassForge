@@ -2,7 +2,9 @@
 
 GlassForge is a Windows desktop tool that applies a configurable frosted-glass backdrop to Microsoft and third-party applications without modifying their binaries. Users select a running application, create a process-restricted profile, and tune window opacity, tint strength, and tint color.
 
-The current foundation is based on the working Teams, Outlook, and Word prototypes in `C:\glass`, but the product code is native C# rather than PowerShell.
+The current foundation is based on working Teams, Outlook, and Word PowerShell prototypes, but the product code is native C#.
+
+> **Public beta — contributors and testers wanted.** GlassForge works day to day, but it needs broader coverage across apps, Windows builds, GPUs, and multi-monitor/DPI setups. See [Get involved](#get-involved).
 
 ## Current capabilities
 
@@ -79,6 +81,12 @@ This design is broadly compatible with Win32, WebView2, Chromium, and Office app
 - Crash recovery, structured logging, and diagnostics export.
 - Optional supported in-process backends for applications with extension APIs.
 - Automated UI and native-window integration tests.
+
+## Get involved
+
+**Testers:** build and run GlassForge, point it at the apps you use, and [open an issue](../../issues/new/choose) using the bug report template. The most useful reports include the target app and version, your Windows build, your monitor/DPI setup, and a screenshot or short clip.
+
+**Developers:** read [CONTRIBUTING.md](CONTRIBUTING.md) and [the architecture doc](docs/ARCHITECTURE.md), then pick anything from the roadmap or the issue tracker. Please open an issue before starting large changes.
 
 ## Safety model
 
