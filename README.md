@@ -6,6 +6,16 @@ The current foundation is based on working Teams, Outlook, and Word PowerShell p
 
 > **Public beta — contributors and testers wanted.** GlassForge works day to day, but it needs broader coverage across apps, Windows builds, GPUs, and multi-monitor/DPI setups. See [Get involved](#get-involved).
 
+![GlassForge applying frosted glass to Chrome](docs/Images/glassforge-demo.gif)
+
+## Screenshots
+
+| Microsoft Edge | Microsoft Word |
+|---|---|
+| ![Edge with GlassForge](docs/Images/edge.png) | ![Word with GlassForge](docs/Images/word.png) |
+| **Outlook (To Do)** | **Spotify** |
+| ![Outlook To Do with GlassForge](docs/Images/outlook-todo.png) | ![Spotify with GlassForge](docs/Images/spotify.png) |
+
 ## Current capabilities
 
 - Discover visible desktop applications.
