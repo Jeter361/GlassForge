@@ -16,6 +16,7 @@ public sealed class AppProfile : INotifyPropertyChanged
     private byte _windowOpacity = DefaultWindowOpacity;
     private byte _tintOpacity = DefaultTintOpacity;
     private string _tintColor = DefaultTintColor;
+    private bool _pauseWhileMediaPlays;
 
     public Guid Id { get; set; } = Guid.NewGuid();
     public string DisplayName { get => _displayName; set => Set(ref _displayName, value); }
@@ -24,6 +25,7 @@ public sealed class AppProfile : INotifyPropertyChanged
     public byte WindowOpacity { get => _windowOpacity; set => Set(ref _windowOpacity, value); }
     public byte TintOpacity { get => _tintOpacity; set => Set(ref _tintOpacity, value); }
     public string TintColor { get => _tintColor; set => Set(ref _tintColor, value.Trim().TrimStart('#').ToUpperInvariant()); }
+    public bool PauseWhileMediaPlays { get => _pauseWhileMediaPlays; set => Set(ref _pauseWhileMediaPlays, value); }
 
     [JsonIgnore] public string OpacityLabel => $"{Math.Round(WindowOpacity / 255d * 100)}%";
     [JsonIgnore] public string Initial => string.IsNullOrWhiteSpace(DisplayName) ? "?" : DisplayName.TrimStart()[..1].ToUpperInvariant();

@@ -252,6 +252,13 @@
                   <TextBlock x:Name="BlueValue" Grid.Row="2" Grid.Column="2" FontSize="12" Foreground="{StaticResource MutedBrush}" FontFamily="Cascadia Mono, Consolas" HorizontalAlignment="Right" VerticalAlignment="Center" />
                 </Grid>
 
+                <TextBlock Text="BEHAVIOR" Style="{StaticResource SectionLabel}" Margin="0,30,0,0" />
+                <Grid Margin="0,12,0,0">
+                  <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                  <StackPanel><TextBlock Text="Pause while media plays" FontSize="13" /><TextBlock Text="Make the app solid while it plays video or audio, so the desktop doesn't show through" FontSize="12" Foreground="{StaticResource SubtleBrush}" TextWrapping="Wrap" Margin="0,2,12,0" /></StackPanel>
+                  <CheckBox Grid.Column="1" IsChecked="{Binding PauseWhileMediaPlays}" VerticalAlignment="Center" />
+                </Grid>
+
                 <Border Background="#148B5CF6" BorderBrush="#268B5CF6" BorderThickness="1" CornerRadius="8" Padding="12,10" Margin="0,24,0,0">
                   <Grid>
                     <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition /></Grid.ColumnDefinitions>

@@ -22,7 +22,8 @@ internal sealed class GlassHostSession : IDisposable
             Enabled = profile.Enabled,
             WindowOpacity = profile.WindowOpacity,
             TintOpacity = profile.TintOpacity,
-            TintColor = profile.TintColor
+            TintColor = profile.TintColor,
+            PauseWhileMediaPlays = profile.PauseWhileMediaPlays
         };
     }
 
@@ -67,6 +68,8 @@ internal sealed class GlassHostForm : System.Windows.Forms.Form
     private nint _target;
     private NativeMethods.Rect _lastRect;
     private bool _hasLastRect;
+    private bool _suspended;
+    private bool _mediaPlaying;
     private int _insetLeft, _insetTop, _insetRight, _insetBottom;
     private readonly Dictionary<nint, nint> _originalStyles = [];
 
@@ -144,6 +147,7 @@ internal sealed class GlassHostForm : System.Windows.Forms.Form
     private void DiscoverTarget()
     {
         _target = WindowDiscoveryService.FindLargestWindow(_profile.ProcessName);
+        _mediaPlaying = _profile.PauseWhileMediaPlays && MediaPlaybackMonitor.IsPlaying(_profile.ProcessName);
         if (_target == nint.Zero) { Hide(); return; }
         if (NativeMethods.GetWindowRect(_target, out var windowRect)
             && NativeMethods.DwmGetWindowAttribute(_target, NativeMethods.DwmwaExtendedFrameBounds, out var frameRect, Marshal.SizeOf<NativeMethods.Rect>()) == 0)
@@ -169,6 +173,12 @@ internal sealed class GlassHostForm : System.Windows.Forms.Form
     private void Align(bool force)
     {
         if (_target == nint.Zero || !NativeMethods.IsWindow(_target) || !NativeMethods.GetWindowRect(_target, out var rect)) return;
+        if (_mediaPlaying || IsFullscreen(_target, rect))
+        {
+            Suspend();
+            return;
+        }
+        _suspended = false;
         rect.Left += _insetLeft;
         rect.Top += _insetTop;
         rect.Right -= _insetRight;
@@ -187,6 +197,27 @@ internal sealed class GlassHostForm : System.Windows.Forms.Form
         NativeMethods.SetLayeredWindowAttributes(_target, 0, _profile.WindowOpacity, NativeMethods.LwaAlpha);
         if (!Visible) Show();
         NativeMethods.SetWindowPos(Handle, _target, rect.Left, rect.Top, width, height, NativeMethods.SwpNoActivate | NativeMethods.SwpShowWindow);
+    }
+
+    // Fullscreen video, games, and slideshows fill the monitor exactly; maximized windows overhang it by their resize border.
+    private static bool IsFullscreen(nint window, NativeMethods.Rect rect)
+    {
+        const uint monitorDefaultToNearest = 2;
+        var info = new NativeMethods.MonitorInfo { Size = Marshal.SizeOf<NativeMethods.MonitorInfo>() };
+        return NativeMethods.GetMonitorInfo(NativeMethods.MonitorFromWindow(window, monitorDefaultToNearest), ref info)
+            && Equal(rect, info.Monitor);
+    }
+
+    // Layered alpha applies to the whole window, so video would show the desktop through it.
+    private void Suspend()
+    {
+        if (_suspended) return;
+        _suspended = true;
+        _hasLastRect = false;
+        if (Visible) Hide();
+        if (!_originalStyles.TryGetValue(_target, out var originalStyle)) return;
+        NativeMethods.SetLayeredWindowAttributes(_target, 0, 255, NativeMethods.LwaAlpha);
+        NativeMethods.SetWindowLongPtr(_target, NativeMethods.GwlExStyle, originalStyle);
     }
 
     private static bool Equal(NativeMethods.Rect left, NativeMethods.Rect right) =>

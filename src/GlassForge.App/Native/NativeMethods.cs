@@ -27,6 +27,15 @@ internal static class NativeMethods
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    internal struct MonitorInfo
+    {
+        internal int Size;
+        internal Rect Monitor;
+        internal Rect Work;
+        internal uint Flags;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     internal struct AttributeData
     {
         internal int Attribute;
@@ -53,6 +62,8 @@ internal static class NativeMethods
     [DllImport("user32.dll")] internal static extern bool IsWindowVisible(nint window);
     [DllImport("user32.dll")] internal static extern bool IsWindow(nint window);
     [DllImport("user32.dll")] internal static extern bool GetWindowRect(nint window, out Rect rect);
+    [DllImport("user32.dll")] internal static extern nint MonitorFromWindow(nint window, uint flags);
+    [DllImport("user32.dll")] internal static extern bool GetMonitorInfo(nint monitor, ref MonitorInfo info);
     [DllImport("user32.dll")] internal static extern uint GetWindowThreadProcessId(nint window, out uint processId);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] internal static extern int GetWindowText(nint window, StringBuilder text, int count);
     [DllImport("user32.dll")] internal static extern bool SetWindowPos(nint window, nint insertAfter, int x, int y, int width, int height, uint flags);
