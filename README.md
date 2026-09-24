@@ -56,6 +56,12 @@ tests/GlassForge.Tests/
   Dependency-free foundation smoke tests
 ```
 
+## Documentation
+
+- [User guide](docs/USER_GUIDE.md)
+- [Software architecture](docs/ARCHITECTURE.md)
+- [PowerShell prototype migration](docs/SCRIPT_MIGRATION.md)
+
 ## Architecture
 
 Each enabled profile owns an isolated STA host thread. The host finds the largest visible top-level window owned by the configured process, applies layered opacity to the target, and positions a non-activating acrylic surface directly behind it. Target discovery is throttled; movement and focus changes use WinEvent callbacks. Frame coordinates are cached so stationary windows produce no compositor repositioning work.
@@ -81,4 +87,3 @@ GlassForge targets windows by owning process ID. It does not inject code, patch 
 ## License
 
 MIT. See `LICENSE`.
-
