@@ -50,11 +50,20 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _tray = new System.Windows.Forms.NotifyIcon
         {
             Text = "GlassForge",
-            Icon = SystemIcons.Application,
+            Icon = LoadTrayIcon(),
             Visible = true,
             ContextMenuStrip = menu
         };
         _tray.DoubleClick += (_, _) => ShowFromTray();
+    }
+
+    // Pick the small-icon frame for the current DPI so the tray icon stays crisp instead of downscaling 32px.
+    private static System.Drawing.Icon LoadTrayIcon()
+    {
+        var resource = System.Windows.Application.GetResourceStream(new Uri("pack://application:,,,/Assets/GlassForge.ico"));
+        if (resource is null) return SystemIcons.Application;
+        using var stream = resource.Stream;
+        return new System.Drawing.Icon(stream, System.Windows.Forms.SystemInformation.SmallIconSize);
     }
 
     private void RefreshRunningApplications(bool announce = true)
