@@ -12,7 +12,7 @@ The current foundation is based on working Teams, Outlook, and Word PowerShell p
 
 Tune tint color and opacity live, with changes applied to the target app instantly:
 
-![Tuning Edge's glass tint and opacity in GlassForge](docs/Images/glassforge-tint-demo.gif)
+![Tuning Chrome's glass tint in GlassForge](docs/Images/glassforge-tint-demo.gif)
 
 | Microsoft Edge | Microsoft Word |
 |---|---|
