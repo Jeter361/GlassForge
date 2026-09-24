@@ -181,7 +181,7 @@ internal sealed class GlassHostForm : System.Windows.Forms.Form
         if (width <= 0 || height <= 0) { Hide(); return; }
 
         var currentStyle = NativeMethods.GetWindowLongPtr(_target, NativeMethods.GwlExStyle);
-        _originalStyles.TryAdd(_target, currentStyle);
+        if (_originalStyles.TryAdd(_target, currentStyle)) WindowStyleLedger.Record(_target, currentStyle);
         var style = currentStyle.ToInt64();
         NativeMethods.SetWindowLongPtr(_target, NativeMethods.GwlExStyle, new nint(style | NativeMethods.WsExLayered));
         NativeMethods.SetLayeredWindowAttributes(_target, 0, _profile.WindowOpacity, NativeMethods.LwaAlpha);
@@ -202,6 +202,7 @@ internal sealed class GlassHostForm : System.Windows.Forms.Form
             _trackingTimer.Dispose();
             foreach (var (window, originalStyle) in _originalStyles)
             {
+                WindowStyleLedger.Forget(window);
                 if (!NativeMethods.IsWindow(window)) continue;
                 NativeMethods.SetLayeredWindowAttributes(window, 0, 255, NativeMethods.LwaAlpha);
                 NativeMethods.SetWindowLongPtr(window, NativeMethods.GwlExStyle, originalStyle);

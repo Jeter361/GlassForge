@@ -6,10 +6,21 @@ namespace GlassForge;
 public partial class App : System.Windows.Application
 {
     private GlassHostManager? _hosts;
+    private Mutex? _singleInstance;
 
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        // Two instances fight over the same target windows and leave them translucent on exit.
+        _singleInstance = new Mutex(true, @"Local\GlassForge.SingleInstance", out var firstInstance);
+        if (!firstInstance)
+        {
+            if (!e.Args.Contains("--background", StringComparer.OrdinalIgnoreCase))
+                System.Windows.MessageBox.Show("GlassForge is already running. Open it from the notification area.", "GlassForge");
+            Shutdown();
+            return;
+        }
+        WindowStyleLedger.RestoreOrphans();
         var store = new ProfileStore();
         _hosts = new GlassHostManager();
         var window = new MainWindow(store, _hosts);
@@ -21,6 +32,7 @@ public partial class App : System.Windows.Application
     protected override void OnExit(ExitEventArgs e)
     {
         _hosts?.Dispose();
+        _singleInstance?.Dispose();
         base.OnExit(e);
     }
 }
