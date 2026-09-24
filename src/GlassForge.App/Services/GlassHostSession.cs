@@ -67,6 +67,8 @@ internal sealed class GlassHostForm : System.Windows.Forms.Form
     private readonly NativeMethods.WinEventProc _foregroundCallback;
     private nint _locationHook;
     private nint _foregroundHook;
+    private readonly NativeMethods.WinEventProc _lifecycleCallback;
+    private readonly List<nint> _lifecycleHooks = [];
     private nint _target;
     private NativeMethods.Rect _lastRect;
     private bool _hasLastRect;
@@ -94,6 +96,7 @@ internal sealed class GlassHostForm : System.Windows.Forms.Form
         _profile = profile;
         _locationCallback = OnLocationChanged;
         _foregroundCallback = OnForegroundChanged;
+        _lifecycleCallback = OnLifecycleChanged;
         FormBorderStyle = System.Windows.Forms.FormBorderStyle.None;
         ShowInTaskbar = false;
         BackColor = Color.Black;
@@ -122,6 +125,14 @@ internal sealed class GlassHostForm : System.Windows.Forms.Form
             nint.Zero, _locationCallback, 0, 0, NativeMethods.WineventOutOfContext);
         _foregroundHook = NativeMethods.SetWinEventHook(NativeMethods.EventSystemForeground, NativeMethods.EventSystemForeground,
             nint.Zero, _foregroundCallback, 0, 0, NativeMethods.WineventOutOfContext);
+        // Destroy, show, hide; cloak and uncloak; minimize start and end.
+        foreach (var (min, max) in new[]
+        {
+            (NativeMethods.EventObjectDestroy, NativeMethods.EventObjectHide),
+            (NativeMethods.EventObjectCloaked, NativeMethods.EventObjectUncloaked),
+            (NativeMethods.EventSystemMinimizeStart, NativeMethods.EventSystemMinimizeEnd)
+        })
+            _lifecycleHooks.Add(NativeMethods.SetWinEventHook(min, max, nint.Zero, _lifecycleCallback, 0, 0, NativeMethods.WineventOutOfContext));
         _discoveryTimer.Tick += (_, _) => DiscoverTarget();
         _trackingTimer.Tick += (_, _) => Align(false);
         _discoveryTimer.Start();
@@ -183,9 +194,33 @@ internal sealed class GlassHostForm : System.Windows.Forms.Form
         if (window == _target) Align(true);
     }
 
+    // Closing, hiding, cloaking, or minimizing the target must drop the backdrop immediately; waiting for the
+    // next discovery tick leaves a lone glass panel on screen for up to a second (Chromium hides before destroying).
+    private void OnLifecycleChanged(nint hook, uint eventType, nint window, int objectId, int childId, uint threadId, uint eventTime)
+    {
+        if (window != _target || objectId != NativeMethods.ObjidWindow) return;
+        if (eventType is NativeMethods.EventObjectDestroy or NativeMethods.EventObjectHide
+            or NativeMethods.EventObjectCloaked or NativeMethods.EventSystemMinimizeStart)
+            HideBackdrop();
+        else
+            Align(true);
+    }
+
+    private void HideBackdrop()
+    {
+        _hasLastRect = false;
+        if (Visible) Hide();
+    }
+
     private void Align(bool force)
     {
-        if (_target == nint.Zero || !NativeMethods.IsWindow(_target) || !NativeMethods.GetWindowRect(_target, out var rect)) return;
+        if (_target == nint.Zero) return;
+        if (!NativeMethods.IsWindow(_target) || !NativeMethods.IsWindowVisible(_target) || NativeMethods.IsIconic(_target)
+            || WindowDiscoveryService.IsCloaked(_target) || !NativeMethods.GetWindowRect(_target, out var rect))
+        {
+            HideBackdrop();
+            return;
+        }
         if (_mediaPlaying || IsFullscreen(_target, rect))
         {
             Suspend();
@@ -240,6 +275,8 @@ internal sealed class GlassHostForm : System.Windows.Forms.Form
     {
         if (_locationHook != nint.Zero) NativeMethods.UnhookWinEvent(_locationHook);
         if (_foregroundHook != nint.Zero) NativeMethods.UnhookWinEvent(_foregroundHook);
+        foreach (var hook in _lifecycleHooks) if (hook != nint.Zero) NativeMethods.UnhookWinEvent(hook);
+        _lifecycleHooks.Clear();
         if (disposing)
         {
             _discoveryTimer.Dispose();

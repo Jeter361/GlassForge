@@ -70,6 +70,9 @@ public sealed class WindowDiscoveryService
     private static bool IsUserVisible(nint window)
     {
         if ((NativeMethods.GetWindowLongPtr(window, NativeMethods.GwlExStyle).ToInt64() & NativeMethods.WsExToolWindow) != 0) return false;
-        return NativeMethods.DwmGetWindowAttribute(window, NativeMethods.DwmwaCloaked, out int cloaked, sizeof(int)) != 0 || cloaked == 0;
+        return !IsCloaked(window);
     }
+
+    internal static bool IsCloaked(nint window) =>
+        NativeMethods.DwmGetWindowAttribute(window, NativeMethods.DwmwaCloaked, out int cloaked, sizeof(int)) == 0 && cloaked != 0;
 }

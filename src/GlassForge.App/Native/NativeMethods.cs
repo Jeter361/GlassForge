@@ -57,6 +57,12 @@ internal static class NativeMethods
     internal const int WcaAccentPolicy = 19;
     internal const uint EventSystemForeground = 0x0003;
     internal const uint EventObjectLocationChange = 0x800B;
+    internal const uint EventSystemMinimizeStart = 0x0016;
+    internal const uint EventSystemMinimizeEnd = 0x0017;
+    internal const uint EventObjectDestroy = 0x8001;
+    internal const uint EventObjectHide = 0x8003;
+    internal const uint EventObjectCloaked = 0x8017;
+    internal const uint EventObjectUncloaked = 0x8018;
     internal const uint WineventOutOfContext = 0;
     internal const int ObjidWindow = 0;
     internal const uint SwpNoActivate = 0x0010;
@@ -65,6 +71,7 @@ internal static class NativeMethods
     [DllImport("user32.dll")] internal static extern bool EnumWindows(EnumWindowsProc callback, nint parameter);
     [DllImport("user32.dll")] internal static extern bool IsWindowVisible(nint window);
     [DllImport("user32.dll")] internal static extern bool IsWindow(nint window);
+    [DllImport("user32.dll")] internal static extern bool IsIconic(nint window);
     [DllImport("user32.dll")] internal static extern bool GetWindowRect(nint window, out Rect rect);
     [DllImport("user32.dll")] internal static extern nint MonitorFromWindow(nint window, uint flags);
     [DllImport("user32.dll")] internal static extern bool GetMonitorInfo(nint monitor, ref MonitorInfo info);
