@@ -7,12 +7,15 @@ namespace GlassForge.Models;
 
 public sealed class AppProfile : INotifyPropertyChanged
 {
+    public const byte DefaultWindowOpacity = 195;
+    public const byte DefaultTintOpacity = 32;
+    public const string DefaultTintColor = "181818";
     private string _displayName = "New profile";
     private string _processName = "";
     private bool _enabled = true;
-    private byte _windowOpacity = 195;
-    private byte _tintOpacity = 32;
-    private string _tintColor = "181818";
+    private byte _windowOpacity = DefaultWindowOpacity;
+    private byte _tintOpacity = DefaultTintOpacity;
+    private string _tintColor = DefaultTintColor;
 
     public Guid Id { get; set; } = Guid.NewGuid();
     public string DisplayName { get => _displayName; set => Set(ref _displayName, value); }
@@ -25,6 +28,13 @@ public sealed class AppProfile : INotifyPropertyChanged
     [JsonIgnore] public string OpacityLabel => $"{Math.Round(WindowOpacity / 255d * 100)}%";
     [JsonIgnore] public string TintLabel => $"{Math.Round(TintOpacity / 255d * 100)}%";
     public event PropertyChangedEventHandler? PropertyChanged;
+
+    public void ResetAppearance()
+    {
+        WindowOpacity = DefaultWindowOpacity;
+        TintOpacity = DefaultTintOpacity;
+        TintColor = DefaultTintColor;
+    }
 
     private void Set<T>(ref T field, T value, [CallerMemberName] string? property = null)
     {

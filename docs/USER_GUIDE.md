@@ -79,6 +79,12 @@ A six-digit RGB hexadecimal color without an alpha component.
 
 Wallpaper colors remain most natural with a dark neutral color and low tint strength.
 
+### Reset default
+
+Select **Reset default** to restore the selected profile to the balanced neutral appearance: 76% foreground opacity, a low-strength `181818` tint, and wallpaper-responsive glass. The reset is staged until **Save & apply**.
+
+GlassForge's own management window uses a native Windows 11 translucent backdrop so the tool visually demonstrates the material it configures.
+
 ## Managing profiles
 
 - **Save & apply** saves the complete profile list and restarts the selected effect.

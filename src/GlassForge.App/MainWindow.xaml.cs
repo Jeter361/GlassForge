@@ -37,6 +37,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         SelectedProfile = Profiles.FirstOrDefault();
         DataContext = this;
         InitializeComponent();
+        SourceInitialized += (_, _) => WindowBackdropService.Apply(this);
         StartupCheckBox.IsChecked = StartupService.IsEnabled;
         RefreshRunningApplications();
         UpdateColorControls();
@@ -98,6 +99,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (SelectedProfile is null || sender is not WpfButton { Tag: string color }) return;
         SelectedProfile.TintColor = color;
         UpdateColorControls();
+    }
+
+    private void ResetAppearance(object sender, RoutedEventArgs e)
+    {
+        if (SelectedProfile is null) return;
+        SelectedProfile.ResetAppearance();
+        UpdateColorControls();
+        StatusText.Text = "Restored the neutral GlassForge defaults; select Save & apply to use them";
     }
 
     private void ChooseTintColor(object sender, RoutedEventArgs e)

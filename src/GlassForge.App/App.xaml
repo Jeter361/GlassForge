@@ -3,18 +3,18 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              ShutdownMode="OnExplicitShutdown">
   <Application.Resources>
-    <SolidColorBrush x:Key="PageBrush" Color="#101014" />
-    <SolidColorBrush x:Key="PanelBrush" Color="#19191F" />
-    <SolidColorBrush x:Key="RaisedBrush" Color="#22222A" />
+    <SolidColorBrush x:Key="PageBrush" Color="#B0101014" />
+    <SolidColorBrush x:Key="PanelBrush" Color="#B819191F" />
+    <SolidColorBrush x:Key="RaisedBrush" Color="#D022222A" />
     <SolidColorBrush x:Key="TextBrush" Color="#F4F2F8" />
     <SolidColorBrush x:Key="MutedBrush" Color="#A9A4B2" />
     <SolidColorBrush x:Key="AccentBrush" Color="#8B5CF6" />
-    <SolidColorBrush x:Key="BorderBrush" Color="#34323D" />
+    <SolidColorBrush x:Key="BorderBrush" Color="#603F3D48" />
     <Style TargetType="TextBlock"><Setter Property="Foreground" Value="{StaticResource TextBrush}" /></Style>
     <Style TargetType="Button">
       <Setter Property="Foreground" Value="White"/><Setter Property="Background" Value="{StaticResource RaisedBrush}"/>
       <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/><Setter Property="Padding" Value="14,8"/>
-      <Setter Property="Margin" Value="4"/><Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="BorderThickness" Value="1"/><Setter Property="Margin" Value="4"/><Setter Property="Cursor" Value="Hand"/>
     </Style>
     <Style TargetType="TextBox">
       <Setter Property="Foreground" Value="{StaticResource TextBrush}"/><Setter Property="Background" Value="{StaticResource RaisedBrush}"/>
