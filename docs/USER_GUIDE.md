@@ -38,9 +38,9 @@ Closing the main window minimizes GlassForge to the notification area. Use the t
 
 1. Open the application you want to customize.
 2. Open GlassForge.
-3. Select **Refresh apps**.
-4. Choose the application under **Running applications**.
-5. Select **Add selected application**.
+3. Find the application in the live **Running applications** browser. The list updates automatically.
+4. Use the search field if needed.
+5. Select **Add** on the application's card.
 6. Review the generated display name and process name.
 7. Adjust opacity, tint strength, and tint color.
 8. Keep **Enabled** checked.
@@ -109,7 +109,11 @@ These are ordinary editable profiles, not hard-coded special cases.
 
 ### The application is not listed
 
-Make sure it has a visible top-level window, then select **Refresh apps**. Background-only and tray-only processes are intentionally excluded.
+Make sure it has a visible top-level window and wait up to two seconds for live discovery. Background-only and tray-only processes are intentionally excluded.
+
+### Color customization
+
+Use a built-in swatch, enter a six-digit hex color, adjust the individual red/green/blue channels, or open the full Windows color dialog. The preview updates immediately; the target application changes only after **Save & apply**.
 
 ### The effect does not appear
 
@@ -139,4 +143,3 @@ GlassForge uses a separate backdrop HWND. Location events and synchronous window
 3. Enable one profile at a time.
 4. Test move, resize, minimize, restore, focus switching, multiple monitors, and display scaling.
 5. Use **Stop** before exiting the target application during early testing.
-
