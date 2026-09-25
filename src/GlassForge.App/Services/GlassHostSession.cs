@@ -211,7 +211,9 @@ internal sealed class GlassHostForm : System.Windows.Forms.Form
         // Another window of the same app appeared or was restored: re-pick the target now rather than
         // on the next discovery tick, so new and restored windows get their glass without a delay.
         // Tooltips and menus fire bursts of these; coalesce each burst into one discovery pass.
-        if (!disappearing && !_discoveryQueued && NativeMethods.GetWindowThreadProcessId(window, out var processId) != 0 && _processIds.Contains(processId))
+        // Child windows (render surfaces, controls) also raise these, so only top-level windows count.
+        if (!disappearing && !_discoveryQueued && NativeMethods.GetAncestor(window, NativeMethods.GaRoot) == window
+            && NativeMethods.GetWindowThreadProcessId(window, out var processId) != 0 && _processIds.Contains(processId))
         {
             _discoveryQueued = true;
             BeginInvoke(() =>
@@ -254,13 +256,29 @@ internal sealed class GlassHostForm : System.Windows.Forms.Form
         var height = rect.Bottom - rect.Top;
         if (width <= 0 || height <= 0) { Hide(); return; }
 
+        ApplyTargetOpacity();
+        if (!Visible) Show();
+        NativeMethods.SetWindowPos(Handle, _target, rect.Left, rect.Top, width, height, NativeMethods.SwpNoActivate | NativeMethods.SwpShowWindow);
+    }
+
+    // Forced aligns run every discovery tick and on focus and window events, so only touch the target when its
+    // state is actually wrong: every SetWindowLongPtr sends WM_STYLECHANGING/WM_STYLECHANGED even when the style
+    // is unchanged, and many apps (Chromium, Electron, WPF, Qt) redraw their frame on that, which shows as flicker.
+    private void ApplyTargetOpacity()
+    {
         var currentStyle = NativeMethods.GetWindowLongPtr(_target, NativeMethods.GwlExStyle);
         if (_originalStyles.TryAdd(_target, currentStyle)) WindowStyleLedger.Record(_target, currentStyle);
         var style = currentStyle.ToInt64();
-        NativeMethods.SetWindowLongPtr(_target, NativeMethods.GwlExStyle, new nint(style | NativeMethods.WsExLayered));
-        NativeMethods.SetLayeredWindowAttributes(_target, 0, _profile.WindowOpacity, NativeMethods.LwaAlpha);
-        if (!Visible) Show();
-        NativeMethods.SetWindowPos(Handle, _target, rect.Left, rect.Top, width, height, NativeMethods.SwpNoActivate | NativeMethods.SwpShowWindow);
+        uint key = 0, flags = 0;
+        if ((style & NativeMethods.WsExLayered) == 0)
+            NativeMethods.SetWindowLongPtr(_target, NativeMethods.GwlExStyle, new nint(style | NativeMethods.WsExLayered));
+        else if (!NativeMethods.GetLayeredWindowAttributes(_target, out key, out var alpha, out flags))
+            // The app draws itself with UpdateLayeredWindow (per-pixel alpha); SetLayeredWindowAttributes would make
+            // its next UpdateLayeredWindow calls fail, so it stops repainting or flashes. Leave its alpha alone.
+            return;
+        else if ((flags & NativeMethods.LwaAlpha) != 0 && alpha == _profile.WindowOpacity)
+            return;
+        NativeMethods.SetLayeredWindowAttributes(_target, key, _profile.WindowOpacity, flags | NativeMethods.LwaAlpha);
     }
 
     // Fullscreen video, games, and slideshows fill the monitor exactly; maximized windows overhang it by their resize border.

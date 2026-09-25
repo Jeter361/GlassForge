@@ -46,6 +46,7 @@ internal static class NativeMethods
     internal const int GwlExStyle = -20;
     internal const long WsExLayered = 0x00080000;
     internal const uint LwaAlpha = 2;
+    internal const uint GaRoot = 2;
     internal const int DwmwaExtendedFrameBounds = 9;
     internal const int DwmwaCloaked = 14;
     internal const long WsExToolWindow = 0x00000080;
@@ -79,6 +80,8 @@ internal static class NativeMethods
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] internal static extern int GetWindowText(nint window, StringBuilder text, int count);
     [DllImport("user32.dll")] internal static extern bool SetWindowPos(nint window, nint insertAfter, int x, int y, int width, int height, uint flags);
     [DllImport("user32.dll")] internal static extern bool SetLayeredWindowAttributes(nint window, uint key, byte alpha, uint flags);
+    [DllImport("user32.dll")] internal static extern bool GetLayeredWindowAttributes(nint window, out uint key, out byte alpha, out uint flags);
+    [DllImport("user32.dll")] internal static extern nint GetAncestor(nint window, uint flags);
     [DllImport("user32.dll")] internal static extern int SetWindowCompositionAttribute(nint window, ref AttributeData data);
     [DllImport("user32.dll")] internal static extern nint SetWinEventHook(uint eventMin, uint eventMax, nint module, WinEventProc callback, uint processId, uint threadId, uint flags);
     [DllImport("user32.dll")] internal static extern bool UnhookWinEvent(nint hook);
