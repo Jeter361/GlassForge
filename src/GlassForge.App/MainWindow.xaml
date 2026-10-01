@@ -5,6 +5,17 @@
         Background="Transparent" WindowStartupLocation="CenterScreen"
         FontFamily="{StaticResource UiFont}" TextOptions.TextFormattingMode="Display"
         StateChanged="WindowStateChanged">
+  <Window.Resources>
+    <!-- Editor sections that only apply to one glass mode -->
+    <Style x:Key="HostOnly" TargetType="StackPanel">
+      <Style.Triggers><DataTrigger Binding="{Binding Mode}" Value="Native"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger></Style.Triggers>
+    </Style>
+    <Style x:Key="NativeOnly" TargetType="StackPanel">
+      <Setter Property="Visibility" Value="Collapsed" />
+      <Style.Triggers><DataTrigger Binding="{Binding Mode}" Value="Native"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
+    </Style>
+  </Window.Resources>
+
   <WindowChrome.WindowChrome>
     <WindowChrome CaptionHeight="44" ResizeBorderThickness="6" GlassFrameThickness="-1" CornerRadius="0" UseAeroCaptionButtons="False" />
   </WindowChrome.WindowChrome>
@@ -69,7 +80,9 @@
                   </Grid>
                   <StackPanel Grid.Column="1" VerticalAlignment="Center">
                     <TextBlock Text="{Binding DisplayName}" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                    <TextBlock Text="{Binding ProcessName, StringFormat={}{0}.exe}" FontSize="12" Foreground="{StaticResource MutedBrush}" Margin="0,2,0,0" TextTrimming="CharacterEllipsis" />
+                    <TextBlock FontSize="12" Foreground="{StaticResource MutedBrush}" Margin="0,2,0,0" TextTrimming="CharacterEllipsis">
+                      <Run Text="{Binding ProcessName, StringFormat={}{0}.exe, Mode=OneWay}" /><Run Text=" · " Foreground="{StaticResource SubtleBrush}" /><Run Text="{Binding ModeLabel, Mode=OneWay}" Foreground="{StaticResource SubtleBrush}" />
+                    </TextBlock>
                   </StackPanel>
                   <Ellipse Grid.Column="2" Width="7" Height="7" VerticalAlignment="Center" Margin="10,0,2,0">
                     <Ellipse.Style>
@@ -188,6 +201,21 @@
                   <StackPanel Grid.Column="2"><TextBlock Text="Process name" Style="{StaticResource FieldLabel}" /><TextBox Text="{Binding ProcessName, UpdateSourceTrigger=PropertyChanged}" Tag="e.g. olk" /></StackPanel>
                 </Grid>
 
+                <TextBlock Text="MODE" Style="{StaticResource SectionLabel}" Margin="0,30,0,0" />
+                <Border Style="{StaticResource SegmentGroup}" Margin="0,12,0,0" HorizontalAlignment="Left">
+                  <StackPanel Orientation="Horizontal">
+                    <RadioButton Style="{StaticResource Segment}" GroupName="Mode" Content="Glass host" IsChecked="{Binding Mode, Converter={StaticResource EnumMatch}, ConverterParameter=Host}" />
+                    <RadioButton Style="{StaticResource Segment}" GroupName="Mode" Content="Native backdrop" IsChecked="{Binding Mode, Converter={StaticResource EnumMatch}, ConverterParameter=Native}" />
+                  </StackPanel>
+                </Border>
+                <StackPanel Style="{StaticResource HostOnly}">
+                  <TextBlock Text="Works with any app. GlassForge tracks the window with its own acrylic layer and makes the app translucent on top of it." FontSize="12" Foreground="{StaticResource SubtleBrush}" TextWrapping="Wrap" Margin="0,8,0,0" />
+                </StackPanel>
+                <StackPanel Style="{StaticResource NativeOnly}">
+                  <TextBlock Text="Windows draws the material on the app's own frame: sharpest look, zero overhead, nothing to flicker. Apps that paint their own background (Chrome, Electron, games) only get it in the title bar; use Glass host for those." FontSize="12" Foreground="{StaticResource SubtleBrush}" TextWrapping="Wrap" Margin="0,8,0,0" />
+                  <TextBlock x:Name="NativeUnsupportedText" Text="Native backdrops need Windows 11 22H2 or newer; only the window options below will apply." FontSize="12" Foreground="{StaticResource DangerBrush}" TextWrapping="Wrap" Margin="0,6,0,0" Visibility="Collapsed" />
+                </StackPanel>
+
                 <Grid Margin="0,30,0,0">
                   <TextBlock Text="MATERIAL" Style="{StaticResource SectionLabel}" VerticalAlignment="Center" />
                   <Button Style="{StaticResource GhostButton}" HorizontalAlignment="Right" Padding="8,3" FontSize="12" Click="ResetAppearance" ToolTip="Restore the neutral GlassForge defaults">
@@ -197,6 +225,22 @@
                     </StackPanel>
                   </Button>
                 </Grid>
+                <StackPanel Style="{StaticResource NativeOnly}">
+                  <Border Style="{StaticResource SegmentGroup}" Margin="0,12,0,0" HorizontalAlignment="Left">
+                    <StackPanel Orientation="Horizontal">
+                      <RadioButton Style="{StaticResource Segment}" GroupName="Backdrop" Content="Acrylic" ToolTip="Blurs whatever is behind the window" IsChecked="{Binding Backdrop, Converter={StaticResource EnumMatch}, ConverterParameter=Acrylic}" />
+                      <RadioButton Style="{StaticResource Segment}" GroupName="Backdrop" Content="Mica" ToolTip="Subtle wallpaper tint, like File Explorer" IsChecked="{Binding Backdrop, Converter={StaticResource EnumMatch}, ConverterParameter=Mica}" />
+                      <RadioButton Style="{StaticResource Segment}" GroupName="Backdrop" Content="Mica Alt" ToolTip="Stronger wallpaper tint, like tabbed apps" IsChecked="{Binding Backdrop, Converter={StaticResource EnumMatch}, ConverterParameter=MicaAlt}" />
+                    </StackPanel>
+                  </Border>
+                  <Grid Margin="0,16,0,0">
+                    <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                    <StackPanel><TextBlock Text="Extend into the whole window" FontSize="13" /><TextBlock Text="Lets the material show through anywhere the app leaves blank. Classic Win32 apps can draw text oddly with this on." FontSize="12" Foreground="{StaticResource SubtleBrush}" TextWrapping="Wrap" Margin="0,2,12,0" /></StackPanel>
+                    <CheckBox Grid.Column="1" IsChecked="{Binding ExtendIntoClient}" VerticalAlignment="Center" />
+                  </Grid>
+                </StackPanel>
+
+                <StackPanel Style="{StaticResource HostOnly}">
                 <Grid Margin="0,12,0,0">
                   <StackPanel><TextBlock Text="Foreground opacity" FontSize="13" /><TextBlock Text="How solid the app's own content stays" FontSize="12" Foreground="{StaticResource SubtleBrush}" Margin="0,2,0,0" /></StackPanel>
                   <Border Style="{StaticResource ValueChip}"><TextBlock Text="{Binding OpacityLabel}" FontSize="12" /></Border>
@@ -251,13 +295,41 @@
                   <Slider x:Name="BlueSlider" Grid.Row="2" Grid.Column="1" Minimum="0" Maximum="255" Foreground="#60A5FA" ValueChanged="TintChannelChanged" />
                   <TextBlock x:Name="BlueValue" Grid.Row="2" Grid.Column="2" FontSize="12" Foreground="{StaticResource MutedBrush}" FontFamily="Cascadia Mono, Consolas" HorizontalAlignment="Right" VerticalAlignment="Center" />
                 </Grid>
+                </StackPanel>
 
+                <TextBlock Text="WINDOW" Style="{StaticResource SectionLabel}" Margin="0,30,0,0" />
+                <Grid Margin="0,12,0,0">
+                  <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                  <StackPanel VerticalAlignment="Center"><TextBlock Text="Corners" FontSize="13" /><TextBlock Text="Default keeps whatever the app asks for" FontSize="12" Foreground="{StaticResource SubtleBrush}" TextWrapping="Wrap" Margin="0,2,12,0" /></StackPanel>
+                  <Border Grid.Column="1" Style="{StaticResource SegmentGroup}" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal">
+                      <RadioButton Style="{StaticResource Segment}" GroupName="Corners" Content="Default" IsChecked="{Binding Corners, Converter={StaticResource EnumMatch}, ConverterParameter=Default}" />
+                      <RadioButton Style="{StaticResource Segment}" GroupName="Corners" Content="Round" IsChecked="{Binding Corners, Converter={StaticResource EnumMatch}, ConverterParameter=Round}" />
+                      <RadioButton Style="{StaticResource Segment}" GroupName="Corners" Content="Small" IsChecked="{Binding Corners, Converter={StaticResource EnumMatch}, ConverterParameter=RoundSmall}" />
+                      <RadioButton Style="{StaticResource Segment}" GroupName="Corners" Content="Square" IsChecked="{Binding Corners, Converter={StaticResource EnumMatch}, ConverterParameter=Square}" />
+                    </StackPanel>
+                  </Border>
+                </Grid>
+                <Grid Margin="0,14,0,0">
+                  <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                  <StackPanel VerticalAlignment="Center"><TextBlock Text="Title bar" FontSize="13" /><TextBlock Text="Force a dark or light frame on apps that ignore the system theme" FontSize="12" Foreground="{StaticResource SubtleBrush}" TextWrapping="Wrap" Margin="0,2,12,0" /></StackPanel>
+                  <Border Grid.Column="1" Style="{StaticResource SegmentGroup}" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal">
+                      <RadioButton Style="{StaticResource Segment}" GroupName="TitleBar" Content="Default" IsChecked="{Binding TitleBar, Converter={StaticResource EnumMatch}, ConverterParameter=Default}" />
+                      <RadioButton Style="{StaticResource Segment}" GroupName="TitleBar" Content="Dark" IsChecked="{Binding TitleBar, Converter={StaticResource EnumMatch}, ConverterParameter=Dark}" />
+                      <RadioButton Style="{StaticResource Segment}" GroupName="TitleBar" Content="Light" IsChecked="{Binding TitleBar, Converter={StaticResource EnumMatch}, ConverterParameter=Light}" />
+                    </StackPanel>
+                  </Border>
+                </Grid>
+
+                <StackPanel Style="{StaticResource HostOnly}">
                 <TextBlock Text="BEHAVIOR" Style="{StaticResource SectionLabel}" Margin="0,30,0,0" />
                 <Grid Margin="0,12,0,0">
                   <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                   <StackPanel><TextBlock Text="Pause while media plays" FontSize="13" /><TextBlock Text="Make the app solid while it plays video or audio, so the desktop doesn't show through" FontSize="12" Foreground="{StaticResource SubtleBrush}" TextWrapping="Wrap" Margin="0,2,12,0" /></StackPanel>
                   <CheckBox Grid.Column="1" IsChecked="{Binding PauseWhileMediaPlays}" VerticalAlignment="Center" />
                 </Grid>
+                </StackPanel>
 
                 <Border Background="#148B5CF6" BorderBrush="#268B5CF6" BorderThickness="1" CornerRadius="8" Padding="12,10" Margin="0,24,0,0">
                   <Grid>

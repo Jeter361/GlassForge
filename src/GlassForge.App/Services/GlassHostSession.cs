@@ -6,7 +6,7 @@ using GlassForge.Native;
 
 namespace GlassForge.Services;
 
-internal sealed class GlassHostSession : IDisposable
+internal sealed class GlassHostSession : IGlassSession
 {
     private readonly AppProfile _profile;
     private Thread? _thread;
@@ -14,20 +14,10 @@ internal sealed class GlassHostSession : IDisposable
 
     internal GlassHostSession(AppProfile profile)
     {
-        _profile = new AppProfile
-        {
-            Id = profile.Id,
-            DisplayName = profile.DisplayName,
-            ProcessName = profile.ProcessName,
-            Enabled = profile.Enabled,
-            WindowOpacity = profile.WindowOpacity,
-            TintOpacity = profile.TintOpacity,
-            TintColor = profile.TintColor,
-            PauseWhileMediaPlays = profile.PauseWhileMediaPlays
-        };
+        _profile = profile.Clone();
     }
 
-    internal void Start()
+    public void Start()
     {
         _thread = new Thread(() =>
         {
@@ -78,6 +68,8 @@ internal sealed class GlassHostForm : System.Windows.Forms.Form
     private bool _mediaPlaying;
     private int _insetLeft, _insetTop, _insetRight, _insetBottom;
     private readonly Dictionary<nint, nint> _originalStyles = [];
+    private readonly TargetWindowStyler _styler;
+    private readonly Dictionary<uint, bool> _processMatches = [];
 
     protected override System.Windows.Forms.CreateParams CreateParams
     {
@@ -96,6 +88,7 @@ internal sealed class GlassHostForm : System.Windows.Forms.Form
     internal GlassHostForm(AppProfile profile)
     {
         _profile = profile;
+        _styler = new TargetWindowStyler(profile, applyBackdrop: false);
         _locationCallback = OnLocationChanged;
         _foregroundCallback = OnForegroundChanged;
         _lifecycleCallback = OnLifecycleChanged;
@@ -146,7 +139,8 @@ internal sealed class GlassHostForm : System.Windows.Forms.Form
     {
         var useHostBackdrop = 1;
         NativeMethods.DwmSetWindowAttribute(Handle, NativeMethods.DwmwaUseHostBackdropBrush, ref useHostBackdrop, sizeof(int));
-        var corners = 2;
+        // Match the target's corners so the glass doesn't poke out past a square or small-radius frame.
+        var corners = _profile.Corners == CornerStyle.Default ? 2 : TargetWindowStyler.CornerValue(_profile.Corners);
         NativeMethods.DwmSetWindowAttribute(Handle, NativeMethods.DwmwaWindowCornerPreference, ref corners, sizeof(int));
         var color = ParseAbgr(_profile.TintColor, _profile.TintOpacity);
         var accent = new NativeMethods.AccentPolicy { State = NativeMethods.AccentEnableAcrylicBlurBehind, Flags = 2, Color = color };
@@ -173,6 +167,7 @@ internal sealed class GlassHostForm : System.Windows.Forms.Form
     private void DiscoverTarget()
     {
         _target = WindowDiscoveryService.FindLargestWindow(_profile.ProcessName, out _processIds);
+        _processMatches.Clear();
         _mediaPlaying = _profile.PauseWhileMediaPlays && MediaPlaybackMonitor.IsPlaying(_profile.ProcessName);
         if (_target == nint.Zero) { Hide(); return; }
         if (NativeMethods.GetWindowRect(_target, out var windowRect)
@@ -212,8 +207,11 @@ internal sealed class GlassHostForm : System.Windows.Forms.Form
         // on the next discovery tick, so new and restored windows get their glass without a delay.
         // Tooltips and menus fire bursts of these; coalesce each burst into one discovery pass.
         // Child windows (render surfaces, controls) also raise these, so only top-level windows count.
+        // A process launched after the last discovery pass isn't in _processIds yet, so check its name too;
+        // that way a freshly started app gets glass on its first window instead of on the next timer tick.
         if (!disappearing && !_discoveryQueued && NativeMethods.GetAncestor(window, NativeMethods.GaRoot) == window
-            && NativeMethods.GetWindowThreadProcessId(window, out var processId) != 0 && _processIds.Contains(processId))
+            && NativeMethods.GetWindowThreadProcessId(window, out var processId) != 0
+            && (_processIds.Contains(processId) || IsTargetProcess(processId)))
         {
             _discoveryQueued = true;
             BeginInvoke(() =>
@@ -222,6 +220,13 @@ internal sealed class GlassHostForm : System.Windows.Forms.Form
                 DiscoverTarget();
             });
         }
+    }
+
+    private bool IsTargetProcess(uint processId)
+    {
+        if (!_processMatches.TryGetValue(processId, out var matches))
+            _processMatches[processId] = matches = WindowDiscoveryService.IsProcessNamed(processId, _profile.ProcessName);
+        return matches;
     }
 
     private void HideBackdrop()
@@ -257,6 +262,7 @@ internal sealed class GlassHostForm : System.Windows.Forms.Form
         if (width <= 0 || height <= 0) { Hide(); return; }
 
         ApplyTargetOpacity();
+        _styler.Apply(_target);
         if (!Visible) Show();
         NativeMethods.SetWindowPos(Handle, _target, rect.Left, rect.Top, width, height, NativeMethods.SwpNoActivate | NativeMethods.SwpShowWindow);
     }
@@ -323,6 +329,7 @@ internal sealed class GlassHostForm : System.Windows.Forms.Form
                 NativeMethods.SetWindowLongPtr(window, NativeMethods.GwlExStyle, originalStyle);
             }
             _originalStyles.Clear();
+            _styler.RestoreAll();
         }
         base.Dispose(disposing);
     }

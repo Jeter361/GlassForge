@@ -10,6 +10,29 @@ Check(profile.WindowOpacity == 195, "Profiles use the proven 76% default window 
 Check(profile.TintOpacity == 32, "Profiles use the neutral low-strength tint default.");
 Check(!profile.PauseWhileMediaPlays, "Media pause is opt-in so music players keep their glass.");
 
+Check(profile.Mode == GlassMode.Host, "Profiles default to the glass host, which works with every app.");
+Check(profile.Corners == CornerStyle.Default && profile.TitleBar == TitleBarTheme.Default, "Window options leave the app alone by default.");
+
+var styled = new AppProfile { Mode = GlassMode.Native, Backdrop = NativeBackdrop.MicaAlt, Corners = CornerStyle.Square, TitleBar = TitleBarTheme.Dark };
+var notified = false;
+styled.PropertyChanged += (_, _) => notified = true;
+var copy = styled.Clone();
+copy.DisplayName = "Changed";
+Check(!notified, "Clones don't raise change notifications on the original's subscribers.");
+Check(copy.Mode == GlassMode.Native && copy.Backdrop == NativeBackdrop.MicaAlt && copy.Corners == CornerStyle.Square
+    && copy.TitleBar == TitleBarTheme.Dark && copy.Id == styled.Id, "Clones carry every setting.");
+
+var json = System.Text.Json.JsonSerializer.Serialize(styled);
+Check(json.Contains("\"Mode\":\"Native\"") && json.Contains("\"Backdrop\":\"MicaAlt\""), "Enums save as readable names.");
+var legacy = System.Text.Json.JsonSerializer.Deserialize<AppProfile>("{\"DisplayName\":\"Old\",\"ProcessName\":\"olk\",\"WindowOpacity\":200}")!;
+Check(legacy.Mode == GlassMode.Host && legacy.WindowOpacity == 200, "Profiles saved by older versions load as glass host profiles.");
+
+var converter = new GlassForge.Converters.EnumMatchConverter();
+Check(converter.Convert(GlassMode.Native, typeof(bool), "Native", null!) is true, "Segment buttons check for their own value.");
+Check(converter.Convert(GlassMode.Host, typeof(bool), "Native", null!) is false, "Segment buttons stay clear for other values.");
+Check(converter.ConvertBack(true, typeof(CornerStyle), "RoundSmall", null!) is CornerStyle.RoundSmall, "Checking a segment selects its value.");
+Check(TargetWindowStyler.CornerValue(CornerStyle.Square) == 1 && TargetWindowStyler.CornerValue(CornerStyle.Default) == 0, "Corner styles map to DWM values.");
+
 bool MediaMatch(string id, string process) => MediaPlaybackMonitor.Matches(id, MediaPlaybackMonitor.Normalize(process));
 Check(MediaMatch("Chrome", "chrome"), "Chrome media sessions match chrome.exe.");
 Check(MediaMatch("Chrome.UserData.Default", "chrome"), "Profile-specific Chrome session IDs match.");

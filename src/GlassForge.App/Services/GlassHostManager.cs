@@ -2,9 +2,14 @@ using GlassForge.Models;
 
 namespace GlassForge.Services;
 
+internal interface IGlassSession : IDisposable
+{
+    void Start();
+}
+
 public sealed class GlassHostManager : IDisposable
 {
-    private readonly Dictionary<Guid, GlassHostSession> _sessions = [];
+    private readonly Dictionary<Guid, IGlassSession> _sessions = [];
 
     public bool IsRunning(Guid profileId) => _sessions.ContainsKey(profileId);
 
@@ -12,7 +17,9 @@ public sealed class GlassHostManager : IDisposable
     {
         Stop(profile.Id);
         if (string.IsNullOrWhiteSpace(profile.ProcessName)) return;
-        var session = new GlassHostSession(profile);
+        IGlassSession session = profile.Mode == GlassMode.Native
+            ? new NativeBackdropSession(profile)
+            : new GlassHostSession(profile);
         _sessions[profile.Id] = session;
         session.Start();
     }

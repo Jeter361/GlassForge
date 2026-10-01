@@ -43,6 +43,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         UpdateColorControls();
         _appRefreshTimer.Tick += (_, _) => RefreshRunningApplications(false);
         _appRefreshTimer.Start();
+        // The running-apps list is only for the editor; don't rescan every process while sitting in the tray.
+        IsVisibleChanged += (_, _) =>
+        {
+            if (!IsVisible) { _appRefreshTimer.Stop(); return; }
+            RefreshRunningApplications(false);
+            _appRefreshTimer.Start();
+        };
+        if (!TargetWindowStyler.SupportsSystemBackdrop) NativeUnsupportedText.Visibility = Visibility.Visible;
 
         var menu = new System.Windows.Forms.ContextMenuStrip();
         menu.Items.Add("Open GlassForge", null, (_, _) => ShowFromTray());

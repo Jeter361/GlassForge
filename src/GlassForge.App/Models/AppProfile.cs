@@ -5,6 +5,25 @@ using System.Text.Json.Serialization;
 
 namespace GlassForge.Models;
 
+/// <summary>How GlassForge puts glass behind the app.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<GlassMode>))]
+public enum GlassMode
+{
+    /// <summary>A GlassForge acrylic window tracks the app, which is made translucent. Works with any app.</summary>
+    Host,
+    /// <summary>Windows draws the backdrop on the app's own frame. Zero overhead, but only shows where the app doesn't paint.</summary>
+    Native
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<NativeBackdrop>))]
+public enum NativeBackdrop { Acrylic, Mica, MicaAlt }
+
+[JsonConverter(typeof(JsonStringEnumConverter<CornerStyle>))]
+public enum CornerStyle { Default, Round, RoundSmall, Square }
+
+[JsonConverter(typeof(JsonStringEnumConverter<TitleBarTheme>))]
+public enum TitleBarTheme { Default, Dark, Light }
+
 public sealed class AppProfile : INotifyPropertyChanged
 {
     public const byte DefaultWindowOpacity = 195;
@@ -17,6 +36,11 @@ public sealed class AppProfile : INotifyPropertyChanged
     private byte _tintOpacity = DefaultTintOpacity;
     private string _tintColor = DefaultTintColor;
     private bool _pauseWhileMediaPlays;
+    private GlassMode _mode;
+    private NativeBackdrop _backdrop;
+    private bool _extendIntoClient;
+    private CornerStyle _corners;
+    private TitleBarTheme _titleBar;
 
     public Guid Id { get; set; } = Guid.NewGuid();
     public string DisplayName { get => _displayName; set => Set(ref _displayName, value); }
@@ -26,18 +50,36 @@ public sealed class AppProfile : INotifyPropertyChanged
     public byte TintOpacity { get => _tintOpacity; set => Set(ref _tintOpacity, value); }
     public string TintColor { get => _tintColor; set => Set(ref _tintColor, value.Trim().TrimStart('#').ToUpperInvariant()); }
     public bool PauseWhileMediaPlays { get => _pauseWhileMediaPlays; set => Set(ref _pauseWhileMediaPlays, value); }
+    public GlassMode Mode { get => _mode; set => Set(ref _mode, value); }
+    public NativeBackdrop Backdrop { get => _backdrop; set => Set(ref _backdrop, value); }
+    public bool ExtendIntoClient { get => _extendIntoClient; set => Set(ref _extendIntoClient, value); }
+    public CornerStyle Corners { get => _corners; set => Set(ref _corners, value); }
+    public TitleBarTheme TitleBar { get => _titleBar; set => Set(ref _titleBar, value); }
 
     [JsonIgnore] public string OpacityLabel => $"{Math.Round(WindowOpacity / 255d * 100)}%";
     [JsonIgnore] public string Initial => string.IsNullOrWhiteSpace(DisplayName) ? "?" : DisplayName.TrimStart()[..1].ToUpperInvariant();
     [JsonIgnore] public string TintHex => $"#{TintColor}";
     [JsonIgnore] public string TintLabel => $"{Math.Round(TintOpacity / 255d * 100)}%";
+    [JsonIgnore] public string ModeLabel => Mode == GlassMode.Native ? "Native" : "Host";
     public event PropertyChangedEventHandler? PropertyChanged;
+
+    // Hosts run on their own threads and must not see edits that haven't been applied yet.
+    public AppProfile Clone()
+    {
+        var copy = (AppProfile)MemberwiseClone();
+        copy.PropertyChanged = null; // MemberwiseClone copies the UI's subscriptions too.
+        return copy;
+    }
 
     public void ResetAppearance()
     {
         WindowOpacity = DefaultWindowOpacity;
         TintOpacity = DefaultTintOpacity;
         TintColor = DefaultTintColor;
+        Backdrop = NativeBackdrop.Acrylic;
+        ExtendIntoClient = false;
+        Corners = CornerStyle.Default;
+        TitleBar = TitleBarTheme.Default;
     }
 
     private void Set<T>(ref T field, T value, [CallerMemberName] string? property = null)
@@ -49,5 +91,6 @@ public sealed class AppProfile : INotifyPropertyChanged
         if (property == nameof(TintOpacity)) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(TintLabel)));
         if (property == nameof(DisplayName)) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Initial)));
         if (property == nameof(TintColor)) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(TintHex)));
+        if (property == nameof(Mode)) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ModeLabel)));
     }
 }

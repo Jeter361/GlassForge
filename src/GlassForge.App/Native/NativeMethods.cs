@@ -43,7 +43,22 @@ internal static class NativeMethods
         internal int Size;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct Margins
+    {
+        internal int Left;
+        internal int Right;
+        internal int Top;
+        internal int Bottom;
+    }
+
+    internal const int GwlStyle = -16;
     internal const int GwlExStyle = -20;
+    internal const long WsBorder = 0x00800000;
+    internal const long WsDlgFrame = 0x00400000;
+    internal const long WsPopup = 0x80000000;
+    internal const long WsExTransparent = 0x00000020;
+    internal const long WsExNoActivate = 0x08000000;
     internal const long WsExLayered = 0x00080000;
     internal const uint LwaAlpha = 2;
     internal const uint GaRoot = 2;
@@ -53,7 +68,9 @@ internal static class NativeMethods
     internal const int WmDpiChanged = 0x02E0;
     internal static readonly nint DpiAwarenessContextPerMonitorAwareV2 = new(-4);
     internal const int DwmwaUseHostBackdropBrush = 17;
+    internal const int DwmwaUseImmersiveDarkMode = 20;
     internal const int DwmwaWindowCornerPreference = 33;
+    internal const int DwmwaSystemBackdropType = 38;
     internal const int AccentEnableAcrylicBlurBehind = 4;
     internal const int WcaAccentPolicy = 19;
     internal const uint EventSystemForeground = 0x0003;
@@ -61,6 +78,7 @@ internal static class NativeMethods
     internal const uint EventSystemMinimizeStart = 0x0016;
     internal const uint EventSystemMinimizeEnd = 0x0017;
     internal const uint EventObjectDestroy = 0x8001;
+    internal const uint EventObjectShow = 0x8002;
     internal const uint EventObjectHide = 0x8003;
     internal const uint EventObjectCloaked = 0x8017;
     internal const uint EventObjectUncloaked = 0x8018;
@@ -85,11 +103,15 @@ internal static class NativeMethods
     [DllImport("user32.dll")] internal static extern int SetWindowCompositionAttribute(nint window, ref AttributeData data);
     [DllImport("user32.dll")] internal static extern nint SetWinEventHook(uint eventMin, uint eventMax, nint module, WinEventProc callback, uint processId, uint threadId, uint flags);
     [DllImport("user32.dll")] internal static extern bool UnhookWinEvent(nint hook);
+    [DllImport("user32.dll")] internal static extern bool RedrawWindow(nint window, nint updateRect, nint updateRegion, uint flags);
+    internal const uint RdwInvalidate = 0x0001;
+    internal const uint RdwFrame = 0x0400;
     [DllImport("user32.dll")] internal static extern bool SetProcessDpiAwarenessContext(nint value);
     [DllImport("user32.dll")] internal static extern nint SetThreadDpiAwarenessContext(nint value);
     [DllImport("dwmapi.dll")] internal static extern int DwmGetWindowAttribute(nint window, int attribute, out int value, int size);
     [DllImport("dwmapi.dll")] internal static extern int DwmGetWindowAttribute(nint window, int attribute, out Rect value, int size);
     [DllImport("dwmapi.dll")] internal static extern int DwmSetWindowAttribute(nint window, int attribute, ref int value, int size);
+    [DllImport("dwmapi.dll")] internal static extern int DwmExtendFrameIntoClientArea(nint window, ref Margins margins);
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
     private static extern nint GetWindowLongPtr64(nint window, int index);

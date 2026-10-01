@@ -43,6 +43,9 @@ Tune tint color and opacity live, with changes applied to the target app instant
 - Go solid automatically while a target is fullscreen (video, games, slideshows).
 - Optionally go solid while the target app plays media, per profile ("Pause while media plays").
 - Allow only one running instance, and restore any windows left translucent by a crash on the next launch.
+- Two modes per profile: **Glass host** (works with any app) or **Native backdrop**, where Windows draws Acrylic, Mica, or Mica Alt on the app's own frame with zero overhead (Windows 11 22H2+; best for apps that don't paint their own background).
+- Per-profile window options in either mode: corner style (default, round, small, square) and a forced dark or light title bar.
+- Pick up a newly launched app's first window immediately instead of on the next polling pass.
 
 ## Requirements
 
@@ -100,12 +103,17 @@ This design is broadly compatible with Win32, WebView2, Chromium, and Office app
 - Multiple-window support per process.
 - Presets and import/export.
 - Per-monitor and per-state tuning.
-- Material choices: neutral acrylic, colored acrylic, Mica, and blur-behind.
+- An automatic mode that tries the native backdrop first and falls back to the glass host when the app paints over it.
 - Signed installer and automatic updates.
 - Accessibility and high-contrast validation.
 - Crash recovery, structured logging, and diagnostics export.
 - Optional supported in-process backends for applications with extension APIs.
 - Automated UI and native-window integration tests.
+
+## Acknowledgements
+
+Native backdrop mode, the window options, and the window-eligibility rules are inspired by
+[MicaForEveryone](https://github.com/MicaForEveryone/MicaForEveryone) (MIT).
 
 ## Get involved
 

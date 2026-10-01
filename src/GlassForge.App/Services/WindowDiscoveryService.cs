@@ -46,7 +46,7 @@ public sealed class WindowDiscoveryService
 
     internal static nint FindLargestWindow(string processName, out HashSet<uint> processIds)
     {
-        var ids = processIds = Process.GetProcessesByName(processName).Select(process => (uint)process.Id).ToHashSet();
+        var ids = processIds = GetProcessIds(processName);
         nint best = nint.Zero;
         long bestArea = 0;
         NativeMethods.EnumWindows((window, _) =>
@@ -65,6 +65,36 @@ public sealed class WindowDiscoveryService
             return true;
         }, nint.Zero);
         return best;
+    }
+
+    internal static HashSet<uint> GetProcessIds(string processName) =>
+        Process.GetProcessesByName(processName).Select(process => (uint)process.Id).ToHashSet();
+
+    /// <summary>
+    /// True for windows that have a real frame worth styling: visible, top-level, and not a menu, tooltip,
+    /// or overlay. Same eligibility rules MicaForEveryone uses (MIT).
+    /// </summary>
+    internal static bool IsFramedAppWindow(nint window)
+    {
+        if (!NativeMethods.IsWindowVisible(window) || NativeMethods.GetAncestor(window, NativeMethods.GaRoot) != window) return false;
+        var style = NativeMethods.GetWindowLongPtr(window, NativeMethods.GwlStyle).ToInt64();
+        var exStyle = NativeMethods.GetWindowLongPtr(window, NativeMethods.GwlExStyle).ToInt64();
+        if ((exStyle & (NativeMethods.WsExNoActivate | NativeMethods.WsExTransparent)) != 0) return false;
+        var hasTitleBar = (style & NativeMethods.WsBorder) != 0 && (style & NativeMethods.WsDlgFrame) != 0;
+        if ((exStyle & NativeMethods.WsExToolWindow) != 0 && !hasTitleBar) return false;
+        if ((style & NativeMethods.WsPopup) != 0 && !hasTitleBar) return false;
+        return true;
+    }
+
+    internal static bool IsProcessNamed(uint processId, string processName)
+    {
+        try
+        {
+            using var process = Process.GetProcessById((int)processId);
+            return string.Equals(process.ProcessName, processName, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (ArgumentException) { return false; }
+        catch (InvalidOperationException) { return false; }
     }
 
     // IsWindowVisible is true for cloaked windows (other virtual desktops, suspended UWP and Chromium frames)
