@@ -15,6 +15,13 @@ The user considers this the best-looking feature so far. Treat it carefully and 
 - **Commit:** `832a571` (its message says WIP; it was confirmed working afterwards).
 - **Not yet verified:** turning it off restores Mica; minimize/restore; closing and reopening Settings; theme changes.
 
+## Other apps (one at a time)
+
+Classify each app (Win32/GDI, WinUI 3, system XAML/UWP, elevated or not) and measure before hooking. Prefer no injection, and tell the user before injecting into a new app.
+
+- **Task Manager: parked.** It runs elevated (High integrity), so a normal-user GlassForge is blocked from every route (UIPI). An elevated probe got glass on the Processes page; Details stays grey. See `docs/GLASS_WRITEUP.md`, "Update 3: Task Manager", and `native/tools/taskmgr-probe.ps1` (run elevated).
+- **Next: Microsoft Word.**
+
 ## Working on this repo
 
 - Build the hook before the app (the app embeds the DLL): `cmake --build native/build --config Release`, then `dotnet build src/GlassForge.App -c Debug --source https://api.nuget.org/v3/index.json`, then `dotnet run --project tests/GlassForge.Tests`.

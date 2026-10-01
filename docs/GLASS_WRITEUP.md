@@ -426,3 +426,56 @@ Working from GlassForge. The session attached on its own (`glass applied`, `UWP 
 ## Open issue: profiles disappearing
 
 Twice a profile vanished from `profiles.json` without being deleted on purpose (Outlook `olk`, later the Windows Terminal profile). GlassForge only saves on add, delete and Save & apply; the likely cause is a GlassForge window with an older in-memory list saving over a file that was edited outside the app. Not yet confirmed or fixed.
+
+---
+
+# Update 3: Task Manager (Oct 1, 2026, night): parked
+
+**State:** measured and probed only. Nothing was added to the app. The user accepted the look and parked it, so the next app is Microsoft Word. The final probe is `native/tools/taskmgr-probe.ps1`.
+
+## What Task Manager is
+
+| | |
+| --- | --- |
+| Exe | `C:\Windows\System32\Taskmgr.exe` (10.0.28000.2738) |
+| Manifest | `requestedExecutionLevel asInvoker` plus `autoElevate true`. For an admin user with UAC on (`ConsentPromptBehaviorAdmin = 5`), a normal launch silently elevates |
+| **Integrity** | **High (`0x3000`, elevated).** GlassForge, Terminal and Claude Code are Medium (`0x2000`) |
+| Main window | `TaskManagerWindow`, style `0x14CF0000`. Asks DWM for Mica (`DWMWA_SYSTEMBACKDROP_TYPE = 2`), dark mode on |
+| Children | 6x `Windows.UI.Composition.DesktopWindowContentBridge` (system XAML islands, like Settings' XAML, **not** WinUI 3); `NativeHWNDHost` → `DirectUIHWND` holding the Details page (`SysListView32`, `SysHeader32`, `SysTabControl32`, `ScrollBar`s); 3x `GlassWindow` / `FilterControlGlassWindow` (search box and toolbar); a hidden `CoreWindow` |
+
+The closest earlier case is Notepad: a Win32 window with a DWM backdrop behind XAML that is already clear.
+
+## What Windows blocks from Medium integrity (UIPI)
+
+All tested against the live window. None of them changed anything.
+
+| Call | Result |
+| --- | --- |
+| `DwmSetWindowAttribute` (Native mode) | `0x80070006` (E_HANDLE) |
+| `SetWindowLongPtr(GWL_EXSTYLE)` (Host mode layering) | Error 5 |
+| `PostMessage` (registered message; also `WM_NCACTIVATE`) | Error 5 |
+| `SetWindowsHookEx` (opt-in hook) | Never loads into a higher-integrity process (documented UIPI behavior; not tested) |
+
+**No GlassForge mode works on elevated Task Manager while GlassForge runs as a normal user.** Reading (`DwmGetWindowAttribute`, `GetClassName`, `OpenProcess` with query-limited access) works.
+
+## Probes (elevated, one UAC prompt each, user's go-ahead)
+
+| Probe | What | User's verdict |
+| --- | --- | --- |
+| 1 | Acrylic (3) + margins `{-1,-1,-1,-1}`, re-applied every 100 ms | **Processes list is glass** (XAML pages clear, same as Notepad). Task Manager never reset its backdrop (0 resets logged). Goes flat when unfocused |
+| 2 | + `WM_NCACTIVATE(TRUE)` posted when focus leaves (100 ms poll) + Details `SysListView32` background set to black (`LVM_SETBKCOLOR`; the original was `#191919`, text background `CLR_NONE`) | Glass kept when unfocused, but **flashes** on focus-out (the poll gap). **Details stays solid grey**: the `ListView` background color isn't what paints it; DirectUI/uxtheme draws it, so it would need the paint hooks Explorer uses. The user is OK with grey Details |
+| 3 (`taskmgr-probe.ps1`) | Same, but `WM_NCACTIVATE(TRUE)` posted from a `SetWinEventHook(EVENT_SYSTEM_FOREGROUND)` callback, so within milliseconds | **Untested by eye**: parked before the user judged the flash |
+
+All probes restored Mica, zero margins and the ListView colors when stopped (`restored … hr=0x0`).
+
+## Options if it's picked up again
+
+1. **Opt-in elevated helper (recommended):** a GlassForge mode that runs elevated after one UAC prompt, only while a profile targets an elevated window, and does only the Native work (backdrop, margins, keep-active). It needs an EXPERIMENTAL toggle and a red warning, because it breaks the README's "no admin" promise. It also covers any other elevated app.
+2. **Launch Task Manager at Medium** (`__COMPAT_LAYER=RunAsInvoker`): plain Native mode works with no admin, but Task Manager loses its admin powers, and it doesn't apply to Ctrl+Shift+Esc.
+3. **Injection** (the only route to glass on Details and to a fully flash-free unfocus) would also need elevation. Not proposed.
+
+## Untested
+
+- Whether probe 3 removes the focus-out flash, or only shortens it (an outside process always lands after `WM_NCACTIVATE(FALSE)`)
+- Light mode, Performance/App history/Startup/Users/Services pages, resize and maximize, and Task Manager's "always on top"
+- The extended-frame alpha-0 effect on the `GlassWindow` search/toolbar strips (no haze reported)
