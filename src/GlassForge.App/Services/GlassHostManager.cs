@@ -7,6 +7,14 @@ internal interface IGlassSession : IDisposable
     void Start();
 }
 
+internal sealed class CompositeSession(params IGlassSession[] sessions) : IGlassSession
+{
+    public void Start() { foreach (var session in sessions) session.Start(); }
+
+    // Stop in reverse so the host gives back the app's opacity before the native session restores its frame.
+    public void Dispose() { foreach (var session in sessions.Reverse()) session.Dispose(); }
+}
+
 public sealed class GlassHostManager : IDisposable
 {
     private readonly Dictionary<Guid, IGlassSession> _sessions = [];
@@ -17,9 +25,15 @@ public sealed class GlassHostManager : IDisposable
     {
         Stop(profile.Id);
         if (string.IsNullOrWhiteSpace(profile.ProcessName)) return;
-        IGlassSession session = profile.Mode == GlassMode.Native
-            ? new NativeBackdropSession(profile)
-            : new GlassHostSession(profile);
+        IGlassSession session = profile.Mode switch
+        {
+            // Stops in reverse: the hook gives each Explorer window its own frame back before the native session
+            // restores what it set.
+            GlassMode.Native when profile.IsExplorer && profile.ExplorerGlass && HookLibrary.IsAvailable =>
+                new CompositeSession(new NativeBackdropSession(profile), new ExplorerHookSession()),
+            GlassMode.Native => new NativeBackdropSession(profile),
+            _ => new GlassHostSession(profile)
+        };
         _sessions[profile.Id] = session;
         session.Start();
     }

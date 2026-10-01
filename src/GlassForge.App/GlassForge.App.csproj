@@ -15,4 +15,9 @@
     <InternalsVisibleTo Include="GlassForge.Tests" />
     <Resource Include="Assets\GlassForge.ico" />
   </ItemGroup>
+  <!-- Full File Explorer glass: the native hook (native/, built with CMake) ships inside the exe. Without a native
+       build the option stays unavailable rather than failing the app build. -->
+  <ItemGroup Condition="Exists('..\..\native\build\Release\GlassForge.Hook.dll')">
+    <EmbeddedResource Include="..\..\native\build\Release\GlassForge.Hook.dll" LogicalName="GlassForge.Hook.dll" Link="Assets\GlassForge.Hook.dll" />
+  </ItemGroup>
 </Project>

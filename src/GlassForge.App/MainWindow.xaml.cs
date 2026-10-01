@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Drawing;
 using System.Windows;
@@ -51,6 +51,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             _appRefreshTimer.Start();
         };
         if (!TargetWindowStyler.SupportsSystemBackdrop) NativeUnsupportedText.Visibility = Visibility.Visible;
+        if (!HookLibrary.IsAvailable) ExplorerHookMissingText.Visibility = Visibility.Visible;
 
         var menu = new System.Windows.Forms.ContextMenuStrip();
         menu.Items.Add("Open GlassForge", null, (_, _) => ShowFromTray());

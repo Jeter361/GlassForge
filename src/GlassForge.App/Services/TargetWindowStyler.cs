@@ -10,8 +10,10 @@ namespace GlassForge.Services;
 /// </summary>
 internal sealed class TargetWindowStyler
 {
-    // DWM_SYSTEMBACKDROP_TYPE: 0 auto, 1 none, 2 Mica, 3 Acrylic, 4 Mica Alt (tabbed). Needs Windows 11 22H2.
+    // DWM_SYSTEMBACKDROP_TYPE: 0 auto, 3 Acrylic. Needs Windows 11 22H2. Mica (2) and Mica Alt (4) are deliberately
+    // not offered: they tint from the static wallpaper image, so they show nothing over animated wallpapers.
     private const int BackdropAuto = 0;
+    private const int BackdropAcrylic = 3;
     private const int CornerDefault = 0;
     internal static bool SupportsSystemBackdrop { get; } = Environment.OSVersion.Version >= new Version(10, 0, 22621);
     internal static bool SupportsCorners { get; } = Environment.OSVersion.Version >= new Version(10, 0, 22000);
@@ -68,9 +70,11 @@ internal sealed class TargetWindowStyler
         {
             if (NativeMethods.DwmGetWindowAttribute(window, NativeMethods.DwmwaSystemBackdropType, out int backdrop, sizeof(int)) == 0)
                 original.Backdrop = backdrop;
-            var value = _profile.Backdrop switch { NativeBackdrop.Mica => 2, NativeBackdrop.MicaAlt => 4, _ => 3 };
+            var value = BackdropAcrylic;
             NativeMethods.DwmSetWindowAttribute(window, NativeMethods.DwmwaSystemBackdropType, ref value, sizeof(int));
-            if (_profile.ExtendIntoClient)
+            // Dialogs (Save As, message boxes) paint plain GDI with no alpha; extended, their black text and
+            // controls turn see-through and glow. They keep the Acrylic title bar only.
+            if (_profile.ExtendIntoClient && !IsDialog(window))
             {
                 // The whole window becomes "frame", so the backdrop shows anywhere the app leaves black/transparent.
                 var margins = new NativeMethods.Margins { Left = -1, Right = -1, Top = -1, Bottom = -1 };
@@ -89,6 +93,12 @@ internal sealed class TargetWindowStyler
         NativeMethods.RedrawWindow(window, nint.Zero, nint.Zero, NativeMethods.RdwFrame | NativeMethods.RdwInvalidate);
 
     internal void Forget(nint window) => _touched.Remove(window);
+
+    private static bool IsDialog(nint window)
+    {
+        var name = new System.Text.StringBuilder(16);
+        return NativeMethods.GetClassName(window, name, name.Capacity) > 0 && name.ToString() == "#32770";
+    }
 
     internal void RestoreAll()
     {

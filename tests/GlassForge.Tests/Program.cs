@@ -13,17 +13,19 @@ Check(!profile.PauseWhileMediaPlays, "Media pause is opt-in so music players kee
 Check(profile.Mode == GlassMode.Host, "Profiles default to the glass host, which works with every app.");
 Check(profile.Corners == CornerStyle.Default && profile.TitleBar == TitleBarTheme.Default, "Window options leave the app alone by default.");
 
-var styled = new AppProfile { Mode = GlassMode.Native, Backdrop = NativeBackdrop.MicaAlt, Corners = CornerStyle.Square, TitleBar = TitleBarTheme.Dark };
+var styled = new AppProfile { Mode = GlassMode.Native, ExtendIntoClient = true, Corners = CornerStyle.Square, TitleBar = TitleBarTheme.Dark };
 var notified = false;
 styled.PropertyChanged += (_, _) => notified = true;
 var copy = styled.Clone();
 copy.DisplayName = "Changed";
 Check(!notified, "Clones don't raise change notifications on the original's subscribers.");
-Check(copy.Mode == GlassMode.Native && copy.Backdrop == NativeBackdrop.MicaAlt && copy.Corners == CornerStyle.Square
+Check(copy.Mode == GlassMode.Native && copy.ExtendIntoClient && copy.Corners == CornerStyle.Square
     && copy.TitleBar == TitleBarTheme.Dark && copy.Id == styled.Id, "Clones carry every setting.");
 
 var json = System.Text.Json.JsonSerializer.Serialize(styled);
-Check(json.Contains("\"Mode\":\"Native\"") && json.Contains("\"Backdrop\":\"MicaAlt\""), "Enums save as readable names.");
+Check(json.Contains("\"Mode\":\"Native\"") && json.Contains("\"Corners\":\"Square\""), "Enums save as readable names.");
+var oldMica = System.Text.Json.JsonSerializer.Deserialize<AppProfile>("{\"ProcessName\":\"olk\",\"Mode\":\"Native\",\"Backdrop\":\"Mica\"}")!;
+Check(oldMica.Mode == GlassMode.Native, "Profiles saved with the removed Mica options still load.");
 var legacy = System.Text.Json.JsonSerializer.Deserialize<AppProfile>("{\"DisplayName\":\"Old\",\"ProcessName\":\"olk\",\"WindowOpacity\":200}")!;
 Check(legacy.Mode == GlassMode.Host && legacy.WindowOpacity == 200, "Profiles saved by older versions load as glass host profiles.");
 Check(profile.KeepGlassWhenUnfocused && legacy.KeepGlassWhenUnfocused, "Native glass stays live when unfocused by default, including for older profiles.");

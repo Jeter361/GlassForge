@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
@@ -14,9 +14,6 @@ public enum GlassMode
     /// <summary>Windows draws the backdrop on the app's own frame. Zero overhead, but only shows where the app doesn't paint.</summary>
     Native
 }
-
-[JsonConverter(typeof(JsonStringEnumConverter<NativeBackdrop>))]
-public enum NativeBackdrop { Acrylic, Mica, MicaAlt }
 
 [JsonConverter(typeof(JsonStringEnumConverter<CornerStyle>))]
 public enum CornerStyle { Default, Round, RoundSmall, Square }
@@ -37,22 +34,27 @@ public sealed class AppProfile : INotifyPropertyChanged
     private string _tintColor = DefaultTintColor;
     private bool _pauseWhileMediaPlays;
     private GlassMode _mode;
-    private NativeBackdrop _backdrop;
     private bool _extendIntoClient;
     private CornerStyle _corners;
     private TitleBarTheme _titleBar;
     private bool _keepGlassWhenUnfocused = true;
+    private bool _explorerGlass;
 
     public Guid Id { get; set; } = Guid.NewGuid();
     public string DisplayName { get => _displayName; set => Set(ref _displayName, value); }
     public string ProcessName { get => _processName; set => Set(ref _processName, Path.GetFileNameWithoutExtension(value.Trim())); }
+    /// <summary>
+    /// Experimental, File Explorer only: loads GlassForge's hook into Explorer so its own backgrounds, scrollbars and
+    /// text are redrawn for glass. The one GlassForge feature that injects code; off unless the user opts in.
+    /// </summary>
+    public bool ExplorerGlass { get => _explorerGlass; set => Set(ref _explorerGlass, value); }
+    [JsonIgnore] public bool IsExplorer => string.Equals(ProcessName, "explorer", StringComparison.OrdinalIgnoreCase);
     public bool Enabled { get => _enabled; set => Set(ref _enabled, value); }
     public byte WindowOpacity { get => _windowOpacity; set => Set(ref _windowOpacity, value); }
     public byte TintOpacity { get => _tintOpacity; set => Set(ref _tintOpacity, value); }
     public string TintColor { get => _tintColor; set => Set(ref _tintColor, value.Trim().TrimStart('#').ToUpperInvariant()); }
     public bool PauseWhileMediaPlays { get => _pauseWhileMediaPlays; set => Set(ref _pauseWhileMediaPlays, value); }
     public GlassMode Mode { get => _mode; set => Set(ref _mode, value); }
-    public NativeBackdrop Backdrop { get => _backdrop; set => Set(ref _backdrop, value); }
     public bool ExtendIntoClient { get => _extendIntoClient; set => Set(ref _extendIntoClient, value); }
     public CornerStyle Corners { get => _corners; set => Set(ref _corners, value); }
     public TitleBarTheme TitleBar { get => _titleBar; set => Set(ref _titleBar, value); }
@@ -78,7 +80,6 @@ public sealed class AppProfile : INotifyPropertyChanged
         WindowOpacity = DefaultWindowOpacity;
         TintOpacity = DefaultTintOpacity;
         TintColor = DefaultTintColor;
-        Backdrop = NativeBackdrop.Acrylic;
         ExtendIntoClient = false;
         KeepGlassWhenUnfocused = true;
         Corners = CornerStyle.Default;
@@ -92,6 +93,7 @@ public sealed class AppProfile : INotifyPropertyChanged
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(property));
         if (property == nameof(WindowOpacity)) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(OpacityLabel)));
         if (property == nameof(TintOpacity)) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(TintLabel)));
+        if (property == nameof(ProcessName)) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsExplorer)));
         if (property == nameof(DisplayName)) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Initial)));
         if (property == nameof(TintColor)) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(TintHex)));
         if (property == nameof(Mode)) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ModeLabel)));

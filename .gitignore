@@ -8,3 +8,4 @@ artifacts/
 *.log
 .dotnet-home/
 desktop.ini
+native/build/

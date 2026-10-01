@@ -97,6 +97,7 @@ internal static class NativeMethods
     [DllImport("user32.dll")] internal static extern bool GetMonitorInfo(nint monitor, ref MonitorInfo info);
     [DllImport("user32.dll")] internal static extern uint GetWindowThreadProcessId(nint window, out uint processId);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] internal static extern int GetWindowText(nint window, StringBuilder text, int count);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] internal static extern int GetClassName(nint window, StringBuilder name, int count);
     [DllImport("user32.dll")] internal static extern bool SetWindowPos(nint window, nint insertAfter, int x, int y, int width, int height, uint flags);
     [DllImport("user32.dll")] internal static extern bool SetLayeredWindowAttributes(nint window, uint key, byte alpha, uint flags);
     [DllImport("user32.dll")] internal static extern bool GetLayeredWindowAttributes(nint window, out uint key, out byte alpha, out uint flags);
@@ -105,6 +106,11 @@ internal static class NativeMethods
     [DllImport("user32.dll")] internal static extern nint SetWinEventHook(uint eventMin, uint eventMax, nint module, WinEventProc callback, uint processId, uint threadId, uint flags);
     [DllImport("user32.dll")] internal static extern bool UnhookWinEvent(nint hook);
     [DllImport("user32.dll")] internal static extern bool PostMessage(nint window, int message, nint wParam, nint lParam);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] internal static extern int RegisterWindowMessage(string name);
+    [DllImport("user32.dll", SetLastError = true)] internal static extern nint SetWindowsHookEx(int id, nint procedure, nint module, uint threadId);
+    [DllImport("user32.dll")] internal static extern bool UnhookWindowsHookEx(nint hook);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] internal static extern nint LoadLibrary(string path);
+    [DllImport("kernel32.dll", CharSet = CharSet.Ansi)] internal static extern nint GetProcAddress(nint module, string name);
     [DllImport("user32.dll")] internal static extern nint GetForegroundWindow();
     [DllImport("user32.dll")] internal static extern bool RedrawWindow(nint window, nint updateRect, nint updateRegion, uint flags);
     internal const uint RdwInvalidate = 0x0001;
