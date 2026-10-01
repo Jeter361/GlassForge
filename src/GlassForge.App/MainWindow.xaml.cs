@@ -112,6 +112,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         StatusText.Text = $"Added {profile.DisplayName}";
     }
 
+    // Click, not Checked: Checked also fires when a Native profile is merely shown, and would undo the user's choice.
+    private void NativeModeChosen(object sender, RoutedEventArgs e)
+    {
+        if (SelectedProfile is { DrawsOwnTitleBar: true }) SelectedProfile.ExtendIntoClient = true;
+    }
+
     private void SetTintPreset(object sender, RoutedEventArgs e)
     {
         if (SelectedProfile is null || sender is not WpfButton { Tag: string color }) return;

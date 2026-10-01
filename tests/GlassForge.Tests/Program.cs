@@ -36,6 +36,10 @@ Check(converter.Convert(GlassMode.Host, typeof(bool), "Native", null!) is false,
 Check(converter.ConvertBack(true, typeof(CornerStyle), "RoundSmall", null!) is CornerStyle.RoundSmall, "Checking a segment selects its value.");
 Check(TargetWindowStyler.CornerValue(CornerStyle.Square) == 1 && TargetWindowStyler.CornerValue(CornerStyle.Default) == 0, "Corner styles map to DWM values.");
 
+var notepad = new AppProfile { ProcessName = "Notepad", Mode = GlassMode.Native };
+notepad.ResetAppearance();
+Check(notepad.DrawsOwnTitleBar && notepad.ExtendIntoClient && !new AppProfile { ProcessName = "olk" }.DrawsOwnTitleBar, "Notepad defaults to whole-window glass; other apps do not.");
+
 bool MediaMatch(string id, string process) => MediaPlaybackMonitor.Matches(id, MediaPlaybackMonitor.Normalize(process));
 Check(MediaMatch("Chrome", "chrome"), "Chrome media sessions match chrome.exe.");
 Check(MediaMatch("Chrome.UserData.Default", "chrome"), "Profile-specific Chrome session IDs match.");

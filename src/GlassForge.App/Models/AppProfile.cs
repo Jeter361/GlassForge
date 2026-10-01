@@ -48,6 +48,12 @@ public sealed class AppProfile : INotifyPropertyChanged
     /// text are redrawn for glass. The one GlassForge feature that injects code; off unless the user opts in.
     /// </summary>
     public bool ExplorerGlass { get => _explorerGlass; set => Set(ref _explorerGlass, value); }
+    /// <summary>
+    /// Apps that draw their own title bar inside the window. The native backdrop sits behind the frame, which their
+    /// content covers, so it only shows once extended into the whole window.
+    /// </summary>
+    private static readonly HashSet<string> OwnTitleBarApps = new(StringComparer.OrdinalIgnoreCase) { "notepad" };
+    [JsonIgnore] public bool DrawsOwnTitleBar => OwnTitleBarApps.Contains(ProcessName);
     [JsonIgnore] public bool IsExplorer => string.Equals(ProcessName, "explorer", StringComparison.OrdinalIgnoreCase);
     public bool Enabled { get => _enabled; set => Set(ref _enabled, value); }
     public byte WindowOpacity { get => _windowOpacity; set => Set(ref _windowOpacity, value); }
@@ -80,7 +86,7 @@ public sealed class AppProfile : INotifyPropertyChanged
         WindowOpacity = DefaultWindowOpacity;
         TintOpacity = DefaultTintOpacity;
         TintColor = DefaultTintColor;
-        ExtendIntoClient = false;
+        ExtendIntoClient = DrawsOwnTitleBar;
         KeepGlassWhenUnfocused = true;
         Corners = CornerStyle.Default;
         TitleBar = TitleBarTheme.Default;

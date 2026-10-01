@@ -205,7 +205,7 @@
                 <Border Style="{StaticResource SegmentGroup}" Margin="0,12,0,0" HorizontalAlignment="Left">
                   <StackPanel Orientation="Horizontal">
                     <RadioButton Style="{StaticResource Segment}" GroupName="Mode" Content="Glass host" IsChecked="{Binding Mode, Converter={StaticResource EnumMatch}, ConverterParameter=Host}" />
-                    <RadioButton Style="{StaticResource Segment}" GroupName="Mode" Content="Native backdrop" IsChecked="{Binding Mode, Converter={StaticResource EnumMatch}, ConverterParameter=Native}" />
+                    <RadioButton Style="{StaticResource Segment}" GroupName="Mode" Content="Native backdrop" Click="NativeModeChosen" IsChecked="{Binding Mode, Converter={StaticResource EnumMatch}, ConverterParameter=Native}" />
                   </StackPanel>
                 </Border>
                 <StackPanel Style="{StaticResource HostOnly}">
