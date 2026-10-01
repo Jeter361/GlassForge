@@ -108,7 +108,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (sender is not WpfButton { DataContext: RunningApplication app }) return;
         var existing = Profiles.FirstOrDefault(profile => profile.ProcessName.Equals(app.ProcessName, StringComparison.OrdinalIgnoreCase));
         if (existing is not null) { SelectedProfile = existing; ProfilesList.SelectedItem = existing; return; }
-        var profile = new AppProfile { DisplayName = app.DisplayName, ProcessName = app.ProcessName };
+        var profile = new AppProfile { DisplayName = app.DisplayName, ProcessName = app.ProcessName, ExecutablePath = app.ExecutablePath ?? "" };
         Profiles.Add(profile);
         SelectedProfile = profile;
         ProfilesList.SelectedItem = profile;

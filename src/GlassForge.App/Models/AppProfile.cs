@@ -39,6 +39,9 @@ public sealed class AppProfile : INotifyPropertyChanged
     private TitleBarTheme _titleBar;
     private bool _keepGlassWhenUnfocused = true;
     private bool _explorerGlass;
+    private string _executablePath = "";
+    private System.Windows.Media.ImageSource? _icon;
+    private bool _iconLoaded;
 
     public Guid Id { get; set; } = Guid.NewGuid();
     public string DisplayName { get => _displayName; set => Set(ref _displayName, value); }
@@ -58,6 +61,23 @@ public sealed class AppProfile : INotifyPropertyChanged
     private static readonly HashSet<string> OwnTitleBarApps = new(StringComparer.OrdinalIgnoreCase) { "notepad" };
     [JsonIgnore] public bool IsNotepad => string.Equals(ProcessName, "notepad", StringComparison.OrdinalIgnoreCase);
     [JsonIgnore] public bool DrawsOwnTitleBar => OwnTitleBarApps.Contains(ProcessName);
+    /// <summary>Last known full path of the app's exe, for its icon while the app isn't running.</summary>
+    public string ExecutablePath { get => _executablePath; set => Set(ref _executablePath, value ?? ""); }
+
+    /// <summary>The app's own icon, or null to show the letter tile. Looked up once, on first display.</summary>
+    [JsonIgnore]
+    public System.Windows.Media.ImageSource? Icon
+    {
+        get
+        {
+            if (_iconLoaded) return _icon;
+            _iconLoaded = true;
+            if (!System.IO.File.Exists(ExecutablePath) && Services.AppIconService.FindExecutable(ProcessName) is { } found)
+                ExecutablePath = found;
+            return _icon = Services.AppIconService.For(ExecutablePath);
+        }
+    }
+    [JsonIgnore] public bool HasIcon => Icon is not null;
     [JsonIgnore] public bool IsExplorer => string.Equals(ProcessName, "explorer", StringComparison.OrdinalIgnoreCase);
     [JsonIgnore] public bool IsTerminal => string.Equals(ProcessName, "WindowsTerminal", StringComparison.OrdinalIgnoreCase);
     /// <summary>The top-level window class the hook styles in this app, or null when the app has no hook mode.</summary>
@@ -108,6 +128,9 @@ public sealed class AppProfile : INotifyPropertyChanged
         if (property == nameof(TintOpacity)) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(TintLabel)));
         if (property == nameof(ProcessName))
         {
+            _iconLoaded = false;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Icon)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HasIcon)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsExplorer)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsTerminal)));
         }

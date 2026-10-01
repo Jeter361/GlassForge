@@ -10,6 +10,17 @@
     <Style x:Key="HostOnly" TargetType="StackPanel">
       <Style.Triggers><DataTrigger Binding="{Binding Mode}" Value="Native"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger></Style.Triggers>
     </Style>
+    <!-- App icons, with the letter tile as the fallback when an app has none -->
+    <Style x:Key="AppIcon" TargetType="Image">
+      <Setter Property="RenderOptions.BitmapScalingMode" Value="HighQuality" />
+      <Style.Triggers><DataTrigger Binding="{Binding HasIcon}" Value="False"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger></Style.Triggers>
+    </Style>
+    <Style x:Key="LetterTile" TargetType="Grid">
+      <Style.Triggers><DataTrigger Binding="{Binding HasIcon}" Value="True"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger></Style.Triggers>
+    </Style>
+    <Style x:Key="LetterTileBorder" TargetType="Border">
+      <Style.Triggers><DataTrigger Binding="{Binding HasIcon}" Value="True"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger></Style.Triggers>
+    </Style>
     <Style x:Key="NativeOnly" TargetType="StackPanel">
       <Setter Property="Visibility" Value="Collapsed" />
       <Style.Triggers><DataTrigger Binding="{Binding Mode}" Value="Native"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
@@ -74,9 +85,12 @@
                 <Grid>
                   <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                   <Grid Width="32" Height="32" Margin="0,0,12,0">
-                    <Border CornerRadius="8" Background="{Binding TintHex}" />
-                    <Border CornerRadius="8" Background="{StaticResource SheenBrush}" BorderBrush="#30FFFFFF" BorderThickness="1" />
-                    <TextBlock Text="{Binding Initial}" FontSize="13" FontWeight="SemiBold" Foreground="#E6FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    <Grid Style="{StaticResource LetterTile}">
+                      <Border CornerRadius="8" Background="{Binding TintHex}" />
+                      <Border CornerRadius="8" Background="{StaticResource SheenBrush}" BorderBrush="#30FFFFFF" BorderThickness="1" />
+                      <TextBlock Text="{Binding Initial}" FontSize="13" FontWeight="SemiBold" Foreground="#E6FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Grid>
+                    <Image Source="{Binding Icon}" Width="28" Height="28" Style="{StaticResource AppIcon}" />
                   </Grid>
                   <StackPanel Grid.Column="1" VerticalAlignment="Center">
                     <TextBlock Text="{Binding DisplayName}" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
@@ -132,12 +146,18 @@
             <ListBox.ItemTemplate>
               <DataTemplate>
                 <Grid>
-                  <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                  <StackPanel Margin="0,0,10,0" VerticalAlignment="Center">
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                  <Grid Width="24" Height="24" Margin="0,0,10,0" VerticalAlignment="Center">
+                    <Border Style="{StaticResource LetterTileBorder}" CornerRadius="6" Background="{StaticResource RaisedBrush}">
+                      <TextBlock Text="{Binding Initial}" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <Image Source="{Binding Icon}" Width="24" Height="24" Style="{StaticResource AppIcon}" />
+                  </Grid>
+                  <StackPanel Grid.Column="1" Margin="0,0,10,0" VerticalAlignment="Center">
                     <TextBlock Text="{Binding DisplayName}" FontSize="13" TextTrimming="CharacterEllipsis" ToolTip="{Binding DisplayName}" />
                     <TextBlock Text="{Binding ProcessName, StringFormat={}{0}.exe}" FontSize="12" Foreground="{StaticResource MutedBrush}" Margin="0,2,0,0" TextTrimming="CharacterEllipsis" />
                   </StackPanel>
-                  <Button Grid.Column="1" Style="{StaticResource AddButton}" Click="AddRunningAppCard" VerticalAlignment="Center" ToolTip="Create a glass profile for this app">
+                  <Button Grid.Column="2" Style="{StaticResource AddButton}" Click="AddRunningAppCard" VerticalAlignment="Center" ToolTip="Create a glass profile for this app">
                     <StackPanel Orientation="Horizontal">
                       <TextBlock Style="{StaticResource Icon}" Text="&#xE710;" FontSize="10" Margin="0,0,6,0" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
                       <TextBlock Text="Add" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
@@ -179,9 +199,12 @@
               <Grid>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                 <Grid Width="44" Height="44" Margin="0,0,14,0">
-                  <Border CornerRadius="11" Background="{Binding TintHex}" />
-                  <Border CornerRadius="11" Background="{StaticResource SheenBrush}" BorderBrush="#30FFFFFF" BorderThickness="1" />
-                  <TextBlock Text="{Binding Initial}" FontSize="18" FontWeight="SemiBold" Foreground="#E6FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                  <Grid Style="{StaticResource LetterTile}">
+                    <Border CornerRadius="11" Background="{Binding TintHex}" />
+                    <Border CornerRadius="11" Background="{StaticResource SheenBrush}" BorderBrush="#30FFFFFF" BorderThickness="1" />
+                    <TextBlock Text="{Binding Initial}" FontSize="18" FontWeight="SemiBold" Foreground="#E6FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                  </Grid>
+                  <Image Source="{Binding Icon}" Width="40" Height="40" Style="{StaticResource AppIcon}" />
                 </Grid>
                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
                   <TextBlock Text="{Binding DisplayName}" FontSize="18" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
