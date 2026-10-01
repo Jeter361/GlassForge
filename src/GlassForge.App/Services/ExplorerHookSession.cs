@@ -17,13 +17,18 @@ internal sealed class ExplorerHookSession : IGlassSession
 {
     private Thread? _thread;
     private ExplorerHookWorker? _worker;
+    private readonly string _windowClass;
+
+    /// <param name="windowClass">Top-level window class to hook: CabinetWClass (File Explorer) or
+    /// CASCADIA_HOSTING_WINDOW_CLASS (Windows Terminal, frame only).</param>
+    internal ExplorerHookSession(string windowClass) => _windowClass = windowClass;
     private readonly ManualResetEventSlim _ready = new();
 
     public void Start()
     {
         _thread = new Thread(() =>
         {
-            try { _worker = new ExplorerHookWorker(); }
+            try { _worker = new ExplorerHookWorker(_windowClass); }
             finally { _ready.Set(); }
             System.Windows.Forms.Application.Run(_worker.Context);
         }) { IsBackground = true, Name = "GlassForge explorer hook" };
@@ -44,7 +49,7 @@ internal sealed class ExplorerHookWorker
 {
     private const int WhGetMessage = 3;
     private const int WmNull = 0;
-    private const string ExplorerWindowClass = "CabinetWClass";
+    private readonly string _windowClass;
     private static readonly int AttachMessage = NativeMethods.RegisterWindowMessage("GlassForge.Hook.Attach");
     private static readonly int DetachMessage = NativeMethods.RegisterWindowMessage("GlassForge.Hook.Detach");
 
@@ -59,8 +64,9 @@ internal sealed class ExplorerHookWorker
 
     internal System.Windows.Forms.ApplicationContext Context { get; } = new();
 
-    internal ExplorerHookWorker()
+    internal ExplorerHookWorker(string windowClass)
     {
+        _windowClass = windowClass;
         _ = _marshal.Handle; // Creates the window that Stop() marshals onto.
         _callback = OnWindowShown;
         var path = HookLibrary.Extract();
@@ -94,7 +100,7 @@ internal sealed class ExplorerHookWorker
 
     private void TryHook(nint window)
     {
-        if (!IsExplorerWindow(window)) return;
+        if (!IsHookedWindow(window)) return;
         var thread = NativeMethods.GetWindowThreadProcessId(window, out _);
         if (thread == 0 || _threads.ContainsKey(thread)) return;
         var hook = NativeMethods.SetWindowsHookEx(WhGetMessage, _procedure, _module, thread);
@@ -105,11 +111,11 @@ internal sealed class ExplorerHookWorker
         NativeMethods.PostMessage(window, WmNull, nint.Zero, nint.Zero);
     }
 
-    private static bool IsExplorerWindow(nint window)
+    private bool IsHookedWindow(nint window)
     {
         if (NativeMethods.GetAncestor(window, NativeMethods.GaRoot) != window) return false;
         var name = new StringBuilder(32);
-        return NativeMethods.GetClassName(window, name, name.Capacity) > 0 && name.ToString() == ExplorerWindowClass;
+        return NativeMethods.GetClassName(window, name, name.Capacity) > 0 && name.ToString() == _windowClass;
     }
 
     internal void Stop()

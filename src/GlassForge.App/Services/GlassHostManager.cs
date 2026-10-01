@@ -27,10 +27,10 @@ public sealed class GlassHostManager : IDisposable
         if (string.IsNullOrWhiteSpace(profile.ProcessName)) return;
         IGlassSession session = profile.Mode switch
         {
-            // Stops in reverse: the hook gives each Explorer window its own frame back before the native session
-            // restores what it set.
-            GlassMode.Native when profile.IsExplorer && profile.ExplorerGlass && HookLibrary.IsAvailable =>
-                new CompositeSession(new NativeBackdropSession(profile), new ExplorerHookSession()),
+            // Stops in reverse: the hook gives each window its own frame back before the native session restores
+            // what it set.
+            GlassMode.Native when profile.HookGlass && profile.HookWindowClass is { } windowClass && HookLibrary.IsAvailable =>
+                new CompositeSession(new NativeBackdropSession(profile), new ExplorerHookSession(windowClass)),
             GlassMode.Native => new NativeBackdropSession(profile),
             _ => new GlassHostSession(profile)
         };

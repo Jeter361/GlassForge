@@ -245,6 +245,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         // WindowChrome windows overhang the monitor by the resize border when maximized.
         var maximized = WindowState == WindowState.Maximized;
         RootGrid.Margin = maximized ? new Thickness(7) : new Thickness(0);
+        WindowBackdropService.Apply(this); // WPF can restore the system menu style on state changes
         MaximizeGlyph.Text = maximized ? "î¤£" : "î¤¢";
     }
 

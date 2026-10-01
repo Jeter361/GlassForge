@@ -46,6 +46,22 @@ namespace
     thread_local HWND t_root = nullptr;
     thread_local bool t_seen = false;
     thread_local bool t_detached = false;
+    // Frame-only windows (Windows Terminal) get the backdrop, extended frame and keep-active, but no paint or XAML
+    // changes: they draw their own content with real alpha already.
+    thread_local bool t_frameOnly = false;
+    // Frame-only windows draw their own caption buttons; with glass extended over the title area DWM also draws its
+    // native ones underneath, slightly offset. DWM only draws them for windows with a system menu, so the style is
+    // dropped while the glass is on (Alt+Space loses the menu; the app's own buttons and the taskbar still work).
+    thread_local bool t_removedSysMenu = false;
+
+    void SetSysMenu(HWND window, bool on)
+    {
+        const LONG_PTR style = GetWindowLongPtrW(window, GWL_STYLE);
+        const LONG_PTR wanted = on ? style | WS_SYSMENU : style & ~static_cast<LONG_PTR>(WS_SYSMENU);
+        if (wanted == style) return;
+        SetWindowLongPtrW(window, GWL_STYLE, wanted);
+        SetWindowPos(window, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    }
     using ThemeClassQuery = HRESULT(WINAPI*)(HTHEME, LPWSTR, int);
     ThemeClassQuery g_themeClassQuery = nullptr;
     // Memory DCs have no HWND. Propagate ownership from their source DC instead
@@ -63,7 +79,7 @@ namespace
 
     bool IsTargetDC(HDC dc)
     {
-        if (!t_root) return false;
+        if (!t_root || t_frameOnly) return false;
         if (const HWND window = WindowFromDC(dc))
             return GetAncestor(window, GA_ROOT) == t_root;
         AcquireSRWLockShared(&g_dcLock);
@@ -116,6 +132,15 @@ namespace
     decltype(&DwmExtendFrameIntoClientArea) Real_DwmExtendFrameIntoClientArea = DwmExtendFrameIntoClientArea;
     constexpr int Acrylic = 3;
     constexpr MARGINS WholeWindow{ -1, -1, -1, -1 };
+    // Windows Terminal: glass behind the tab row and border only; the body keeps Terminal's own background.
+    constexpr int TerminalTabRowHeight = 40; // DIPs
+
+    MARGINS GlassMargins(HWND window)
+    {
+        if (!t_frameOnly) return WholeWindow;
+        const UINT dpi = GetDpiForWindow(window);
+        return MARGINS{ 0, 0, MulDiv(TerminalTabRowHeight, dpi ? dpi : 96, 96), 0 };
+    }
     constexpr UINT_PTR SubclassId = 0x47467731; // "GFw1"
     constexpr UINT_PTR XamlTimerId = 0x47467831;
 
@@ -162,7 +187,11 @@ namespace
 
     HRESULT WINAPI Hook_DwmExtendFrameIntoClientArea(HWND window, const MARGINS* margins)
     {
-        return Real_DwmExtendFrameIntoClientArea(window, IsRoot(window) ? &WholeWindow : margins);
+        if (!IsRoot(window)) return Real_DwmExtendFrameIntoClientArea(window, margins);
+        if (t_frameOnly && margins)
+            Log(L"frame request %p: %d %d %d %d", window, margins->cxLeftWidth, margins->cxRightWidth, margins->cyTopHeight, margins->cyBottomHeight);
+        const MARGINS glass = window == t_root ? GlassMargins(window) : WholeWindow;
+        return Real_DwmExtendFrameIntoClientArea(window, &glass);
     }
 
     // DWM swaps Acrylic for a flat fill on inactive windows; drawing the frame as active keeps the glass live.
@@ -605,11 +634,18 @@ namespace
         ReleaseSRWLockExclusive(&g_rootLock);
         t_root = root;
         Real_DwmSetWindowAttribute(root, DWMWA_SYSTEMBACKDROP_TYPE, &Acrylic, sizeof Acrylic);
-        Real_DwmExtendFrameIntoClientArea(root, &WholeWindow);
+        const MARGINS glass = GlassMargins(root);
+        Real_DwmExtendFrameIntoClientArea(root, &glass);
         SetWindowSubclass(root, RootSubclass, SubclassId, 0);
         DefSubclassProc(root, WM_NCACTIVATE, TRUE, 0);
         RedrawWindow(root, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN);
         Log(L"glass applied to %p on thread %lu (backdrop was %d)", root, GetCurrentThreadId(), original);
+        if (t_frameOnly)
+        {
+            t_removedSysMenu = (GetWindowLongPtrW(root, GWL_STYLE) & WS_SYSMENU) != 0;
+            if (t_removedSysMenu) SetSysMenu(root, false);
+            return;
+        }
         AddXamlThread(g_module, GetCurrentThreadId());
         SetTimer(root, XamlTimerId, 1000, nullptr);
     }
@@ -621,7 +657,7 @@ namespace
         const HWND root = std::exchange(t_root, nullptr);
         if (root)
         {
-            RemoveXamlThread();
+            if (!t_frameOnly) RemoveXamlThread();
             AcquireSRWLockExclusive(&g_rootLock);
             const auto entry = g_roots.find(root);
             int original = entry != g_roots.end() ? entry->second : 0;
@@ -632,6 +668,7 @@ namespace
                 KillTimer(root, XamlTimerId);
                 RemoveWindowSubclass(root, RootSubclass, SubclassId);
             }
+            if (!destroying && IsWindow(root) && std::exchange(t_removedSysMenu, false)) SetSysMenu(root, true);
             if (!destroying && IsWindow(root))
             {
                 // Give back the backdrop Explorer last asked for, and let it redo its own frame margins.
@@ -753,8 +790,11 @@ extern "C" __declspec(dllexport) LRESULT CALLBACK GlassForgeGetMessageProc(int c
             const HWND root = GetAncestor(message->hwnd, GA_ROOT);
             wchar_t name[64]{};
             GetClassNameW(root, name, _countof(name));
-            if (_wcsicmp(name, L"CabinetWClass") == 0)
+            // File Explorer folder windows get the full treatment; Windows Terminal only the frame (see t_frameOnly).
+            const bool terminal = _wcsicmp(name, L"CASCADIA_HOSTING_WINDOW_CLASS") == 0;
+            if (_wcsicmp(name, L"CabinetWClass") == 0 || terminal)
             {
+                t_frameOnly = terminal;
                 Install();
                 if (g_installed) ApplyGlass(root);
             }

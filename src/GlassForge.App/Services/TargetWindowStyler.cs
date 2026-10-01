@@ -100,16 +100,26 @@ internal sealed class TargetWindowStyler
     /// </summary>
     internal void Reassert(nint window)
     {
-        if (!_applyBackdrop || !_touched.TryGetValue(window, out var original)) return;
+        if (!ReassertBackdrop(window) || !_touched[window].Extended) return;
+        var margins = new NativeMethods.Margins { Left = -1, Right = -1, Top = -1, Bottom = -1 };
+        NativeMethods.DwmExtendFrameIntoClientArea(window, ref margins);
+    }
+
+    /// <summary>
+    /// Puts Acrylic back if the app changed the backdrop type; a read, and a write only when needed, so it is cheap
+    /// enough to run every frame. Windows Terminal, for one, re-applies its theme's backdrop on every focus change.
+    /// Returns false for windows this styler doesn't own.
+    /// </summary>
+    internal bool ReassertBackdrop(nint window)
+    {
+        if (!_applyBackdrop || !_touched.ContainsKey(window)) return false;
         if (NativeMethods.DwmGetWindowAttribute(window, NativeMethods.DwmwaSystemBackdropType, out int backdrop, sizeof(int)) == 0 &&
             backdrop != BackdropAcrylic)
         {
             var value = BackdropAcrylic;
             NativeMethods.DwmSetWindowAttribute(window, NativeMethods.DwmwaSystemBackdropType, ref value, sizeof(int));
         }
-        if (!original.Extended) return;
-        var margins = new NativeMethods.Margins { Left = -1, Right = -1, Top = -1, Bottom = -1 };
-        NativeMethods.DwmExtendFrameIntoClientArea(window, ref margins);
+        return true;
     }
 
     internal void Forget(nint window) => _touched.Remove(window);

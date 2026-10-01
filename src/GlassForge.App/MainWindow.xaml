@@ -254,7 +254,7 @@
                         </StackPanel>
                         <TextBlock Text="Glass behind the file list, navigation pane, Home, Gallery, scrollbars and toolbar, not just the title bar. Uses Explorer's dark theme." FontSize="12" Foreground="{StaticResource SubtleBrush}" TextWrapping="Wrap" Margin="0,2,12,0" />
                       </StackPanel>
-                      <CheckBox Grid.Column="1" IsChecked="{Binding ExplorerGlass}" VerticalAlignment="Center" />
+                      <CheckBox Grid.Column="1" IsChecked="{Binding HookGlass}" VerticalAlignment="Center" />
                     </Grid>
                     <Border BorderBrush="{StaticResource DangerBrush}" BorderThickness="1" Background="#1AF87171" CornerRadius="8" Padding="12,10" Margin="0,10,0,0">
                       <StackPanel>
@@ -266,6 +266,36 @@
                                    Text="Unlike everything else in GlassForge, this loads a GlassForge DLL into explorer.exe to redraw its windows. Explorer also runs your taskbar and desktop, so a bug here can crash or freeze them (Windows restarts Explorer automatically). Antivirus may flag it, it can break after Windows updates, and it can conflict with Windhawk, StartAllBack or other Explorer mods. Turning it off restores open windows; a leftover copy of the DLL stays loaded but inactive until Explorer restarts or you sign out." />
                         <TextBlock x:Name="ExplorerHookMissingText" FontSize="12" Foreground="{StaticResource DangerBrush}" TextWrapping="Wrap" Margin="0,6,0,0" Visibility="Collapsed"
                                    Text="This build of GlassForge doesn't include the Explorer hook (it needs the 64-bit build with the native component)." />
+                      </StackPanel>
+                    </Border>
+                  </StackPanel>
+                  <!-- Windows Terminal only: the same hook, frame only -->
+                  <StackPanel Margin="0,16,0,0">
+                    <StackPanel.Style>
+                      <Style TargetType="StackPanel">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                        <Style.Triggers><DataTrigger Binding="{Binding IsTerminal}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
+                      </Style>
+                    </StackPanel.Style>
+                    <Grid>
+                      <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                      <StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                          <TextBlock Text="Glass tab row" FontSize="13" />
+                          <Border Background="#33F87171" CornerRadius="4" Padding="6,1" Margin="8,0,0,0" VerticalAlignment="Center"><TextBlock Text="EXPERIMENTAL" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource DangerBrush}" /></Border>
+                        </StackPanel>
+                        <TextBlock Text="Live Acrylic behind the tab row and border only; the terminal itself keeps Terminal's own background. Stops Terminal resetting its backdrop on focus changes, so nothing flashes. Needs a Terminal theme with a transparent tab row (tabRow background #00000000)." FontSize="12" Foreground="{StaticResource SubtleBrush}" TextWrapping="Wrap" Margin="0,2,12,0" />
+                      </StackPanel>
+                      <CheckBox Grid.Column="1" IsChecked="{Binding HookGlass}" VerticalAlignment="Center" />
+                    </Grid>
+                    <Border BorderBrush="{StaticResource DangerBrush}" BorderThickness="1" Background="#1AF87171" CornerRadius="8" Padding="12,10" Margin="0,10,0,0">
+                      <StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                          <TextBlock Style="{StaticResource Icon}" Text="&#xE7BA;" Foreground="{StaticResource DangerBrush}" Margin="0,0,8,0" VerticalAlignment="Center" />
+                          <TextBlock Text="Warning: this injects code into Windows Terminal" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource DangerBrush}" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <TextBlock FontSize="12" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,0"
+                                   Text="This loads a GlassForge DLL into WindowsTerminal.exe. It only changes how the window frame is drawn, but all Terminal windows share one process: if it ever crashes, every open tab closes with it, including running programs. Antivirus may flag it, and Terminal updates can break it. Turning it off restores open windows and unloads the DLL." />
                       </StackPanel>
                     </Border>
                   </StackPanel>

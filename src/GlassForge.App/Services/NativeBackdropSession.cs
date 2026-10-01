@@ -55,6 +55,10 @@ internal sealed class NativeBackdropWorker
     private const string NotepadEditorClass = "RichEditD2DPT";
     private const int NotepadEditorBackground = 0x272727; // dark theme default, restored if the original was lost
     private readonly System.Windows.Forms.Timer _settleTimer = new() { Interval = 500 };
+    // Apps that re-apply their own backdrop on focus changes (Terminal) do it a few milliseconds after the foreground
+    // event; checking every frame for a moment afterwards puts Acrylic back before DWM visibly fades to theirs.
+    private readonly System.Windows.Forms.Timer _guardTimer = new() { Interval = 15 };
+    private long _guardUntil;
     private int _settleTicks;
 
     internal System.Windows.Forms.ApplicationContext Context { get; } = new();
@@ -71,7 +75,7 @@ internal sealed class NativeBackdropWorker
             nint.Zero, _callback, 0, 0, NativeMethods.WineventOutOfContext));
         _hooks.Add(NativeMethods.SetWinEventHook(NativeMethods.EventObjectDestroy, NativeMethods.EventObjectDestroy,
             nint.Zero, _callback, 0, 0, NativeMethods.WineventOutOfContext));
-        if (KeepsGlass || _profile.ExtendIntoClient)
+        if (_styler.AppliesBackdrop || KeepsGlass)
             _hooks.Add(NativeMethods.SetWinEventHook(NativeMethods.EventSystemForeground, NativeMethods.EventSystemForeground,
                 nint.Zero, _callback, 0, 0, NativeMethods.WineventOutOfContext));
         // Apps reset an extended frame on activation and resize; location changes catch the resize.
@@ -79,6 +83,11 @@ internal sealed class NativeBackdropWorker
             _hooks.Add(NativeMethods.SetWinEventHook(NativeMethods.EventObjectLocationChange, NativeMethods.EventObjectLocationChange,
                 nint.Zero, _callback, 0, 0, NativeMethods.WineventOutOfContext));
         _discoveryTimer.Tick += (_, _) => StyleExistingWindows();
+        _guardTimer.Tick += (_, _) =>
+        {
+            foreach (var window in _styler.StyledWindows) _styler.ReassertBackdrop(window);
+            if (Environment.TickCount64 > _guardUntil) _guardTimer.Stop();
+        };
         _settleTimer.Tick += (_, _) =>
         {
             foreach (var window in _styler.StyledWindows)
@@ -116,11 +125,10 @@ internal sealed class NativeBackdropWorker
         if (eventType == NativeMethods.EventSystemForeground)
         {
             if (KeepsGlass) KeepFramesActive(window);
-            if (_styler.IsStyled(window))
-            {
-                _styler.Reassert(window);
-                Settle();
-            }
+            // Every focus change, not just ours: an app resets its backdrop on losing focus as well as gaining it.
+            Guard();
+            foreach (var styled in _styler.StyledWindows) _styler.Reassert(styled);
+            if (_styler.IsStyled(window)) Settle();
             return;
         }
         if (objectId != NativeMethods.ObjidWindow) return;
@@ -156,6 +164,13 @@ internal sealed class NativeBackdropWorker
         ClearEditorBackgrounds(window);
         Settle();
         if (KeepsGlass && window != NativeMethods.GetForegroundWindow()) SetFrameActive(window, true);
+    }
+
+    private void Guard()
+    {
+        if (!_styler.AppliesBackdrop || !_styler.StyledWindows.Any()) return;
+        _guardUntil = Environment.TickCount64 + 1500;
+        _guardTimer.Start();
     }
 
     private bool ClearsEditors => _profile.IsNotepad && _profile.ExtendIntoClient && TargetWindowStyler.SupportsSystemBackdrop;
@@ -232,6 +247,7 @@ internal sealed class NativeBackdropWorker
         _hooks.Clear();
         _discoveryTimer.Dispose();
         _settleTimer.Dispose();
+        _guardTimer.Dispose();
         if (KeepsGlass)
         {
             var foreground = NativeMethods.GetForegroundWindow();

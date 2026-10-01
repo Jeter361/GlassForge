@@ -44,10 +44,13 @@ public sealed class AppProfile : INotifyPropertyChanged
     public string DisplayName { get => _displayName; set => Set(ref _displayName, value); }
     public string ProcessName { get => _processName; set => Set(ref _processName, Path.GetFileNameWithoutExtension(value.Trim())); }
     /// <summary>
-    /// Experimental, File Explorer only: loads GlassForge's hook into Explorer so its own backgrounds, scrollbars and
-    /// text are redrawn for glass. The one GlassForge feature that injects code; off unless the user opts in.
+    /// Experimental, File Explorer and Windows Terminal only: loads GlassForge's hook into the app. In Explorer it
+    /// redraws backgrounds, scrollbars and text for glass; in Terminal it only stops the app resetting its backdrop
+    /// and frame, so the glass reaches the tab row without flashing. The only GlassForge feature that injects code;
+    /// off unless the user opts in. Saved as "ExplorerGlass", its name when it was Explorer-only.
     /// </summary>
-    public bool ExplorerGlass { get => _explorerGlass; set => Set(ref _explorerGlass, value); }
+    [JsonPropertyName("ExplorerGlass")]
+    public bool HookGlass { get => _explorerGlass; set => Set(ref _explorerGlass, value); }
     /// <summary>
     /// Apps that draw their own title bar inside the window. The native backdrop sits behind the frame, which their
     /// content covers, so it only shows once extended into the whole window.
@@ -56,6 +59,9 @@ public sealed class AppProfile : INotifyPropertyChanged
     [JsonIgnore] public bool IsNotepad => string.Equals(ProcessName, "notepad", StringComparison.OrdinalIgnoreCase);
     [JsonIgnore] public bool DrawsOwnTitleBar => OwnTitleBarApps.Contains(ProcessName);
     [JsonIgnore] public bool IsExplorer => string.Equals(ProcessName, "explorer", StringComparison.OrdinalIgnoreCase);
+    [JsonIgnore] public bool IsTerminal => string.Equals(ProcessName, "WindowsTerminal", StringComparison.OrdinalIgnoreCase);
+    /// <summary>The top-level window class the hook styles in this app, or null when the app has no hook mode.</summary>
+    [JsonIgnore] public string? HookWindowClass => IsExplorer ? "CabinetWClass" : IsTerminal ? "CASCADIA_HOSTING_WINDOW_CLASS" : null;
     public bool Enabled { get => _enabled; set => Set(ref _enabled, value); }
     public byte WindowOpacity { get => _windowOpacity; set => Set(ref _windowOpacity, value); }
     public byte TintOpacity { get => _tintOpacity; set => Set(ref _tintOpacity, value); }
@@ -100,7 +106,11 @@ public sealed class AppProfile : INotifyPropertyChanged
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(property));
         if (property == nameof(WindowOpacity)) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(OpacityLabel)));
         if (property == nameof(TintOpacity)) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(TintLabel)));
-        if (property == nameof(ProcessName)) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsExplorer)));
+        if (property == nameof(ProcessName))
+        {
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsExplorer)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsTerminal)));
+        }
         if (property == nameof(DisplayName)) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Initial)));
         if (property == nameof(TintColor)) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(TintHex)));
         if (property == nameof(Mode)) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ModeLabel)));
