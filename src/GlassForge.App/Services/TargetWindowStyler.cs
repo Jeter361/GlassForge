@@ -92,6 +92,26 @@ internal sealed class TargetWindowStyler
     private static void RepaintFrame(nint window) =>
         NativeMethods.RedrawWindow(window, nint.Zero, nint.Zero, NativeMethods.RdwFrame | NativeMethods.RdwInvalidate);
 
+    /// <summary>
+    /// Puts the backdrop and extended frame back if the app reset them. Apps such as Notepad call
+    /// DwmExtendFrameIntoClientArea themselves (on activation, resize, theme changes), which shrinks the glass back
+    /// to the title bar. Margins can't be read back, so they are simply set again; the backdrop is only rewritten when
+    /// it actually changed.
+    /// </summary>
+    internal void Reassert(nint window)
+    {
+        if (!_applyBackdrop || !_touched.TryGetValue(window, out var original)) return;
+        if (NativeMethods.DwmGetWindowAttribute(window, NativeMethods.DwmwaSystemBackdropType, out int backdrop, sizeof(int)) == 0 &&
+            backdrop != BackdropAcrylic)
+        {
+            var value = BackdropAcrylic;
+            NativeMethods.DwmSetWindowAttribute(window, NativeMethods.DwmwaSystemBackdropType, ref value, sizeof(int));
+        }
+        if (!original.Extended) return;
+        var margins = new NativeMethods.Margins { Left = -1, Right = -1, Top = -1, Bottom = -1 };
+        NativeMethods.DwmExtendFrameIntoClientArea(window, ref margins);
+    }
+
     internal void Forget(nint window) => _touched.Remove(window);
 
     private static bool IsDialog(nint window)

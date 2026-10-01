@@ -54,8 +54,6 @@ internal sealed class NativeBackdropWorker
     private readonly Dictionary<nint, nint> _editors = [];
     private const string NotepadEditorClass = "RichEditD2DPT";
     private const int NotepadEditorBackground = 0x272727; // dark theme default, restored if the original was lost
-    // Notepad applies its theme to a new text area a moment after showing it, over the color set here; a short burst
-    // of re-applies after a window or tab appears catches that without waiting for the discovery timer.
     private readonly System.Windows.Forms.Timer _settleTimer = new() { Interval = 500 };
     private int _settleTicks;
 
@@ -73,13 +71,21 @@ internal sealed class NativeBackdropWorker
             nint.Zero, _callback, 0, 0, NativeMethods.WineventOutOfContext));
         _hooks.Add(NativeMethods.SetWinEventHook(NativeMethods.EventObjectDestroy, NativeMethods.EventObjectDestroy,
             nint.Zero, _callback, 0, 0, NativeMethods.WineventOutOfContext));
-        if (KeepsGlass)
+        if (KeepsGlass || _profile.ExtendIntoClient)
             _hooks.Add(NativeMethods.SetWinEventHook(NativeMethods.EventSystemForeground, NativeMethods.EventSystemForeground,
+                nint.Zero, _callback, 0, 0, NativeMethods.WineventOutOfContext));
+        // Apps reset an extended frame on activation and resize; location changes catch the resize.
+        if (_profile.ExtendIntoClient)
+            _hooks.Add(NativeMethods.SetWinEventHook(NativeMethods.EventObjectLocationChange, NativeMethods.EventObjectLocationChange,
                 nint.Zero, _callback, 0, 0, NativeMethods.WineventOutOfContext));
         _discoveryTimer.Tick += (_, _) => StyleExistingWindows();
         _settleTimer.Tick += (_, _) =>
         {
-            foreach (var window in _styler.StyledWindows) ClearEditorBackgrounds(window);
+            foreach (var window in _styler.StyledWindows)
+            {
+                _styler.Reassert(window);
+                ClearEditorBackgrounds(window);
+            }
             if (--_settleTicks <= 0) _settleTimer.Stop();
         };
         _discoveryTimer.Start();
@@ -98,13 +104,31 @@ internal sealed class NativeBackdropWorker
         }, nint.Zero);
         // New tabs bring new text controls; closed tabs leave handles behind.
         foreach (var editor in _editors.Keys.Where(editor => !NativeMethods.IsWindow(editor)).ToArray()) _editors.Remove(editor);
-        foreach (var window in _styler.StyledWindows) ClearEditorBackgrounds(window);
+        foreach (var window in _styler.StyledWindows)
+        {
+            _styler.Reassert(window);
+            ClearEditorBackgrounds(window);
+        }
     }
 
     private void OnWindowEvent(nint hook, uint eventType, nint window, int objectId, int childId, uint threadId, uint eventTime)
     {
-        if (eventType == NativeMethods.EventSystemForeground) { KeepFramesActive(window); return; }
+        if (eventType == NativeMethods.EventSystemForeground)
+        {
+            if (KeepsGlass) KeepFramesActive(window);
+            if (_styler.IsStyled(window))
+            {
+                _styler.Reassert(window);
+                Settle();
+            }
+            return;
+        }
         if (objectId != NativeMethods.ObjidWindow) return;
+        if (eventType == NativeMethods.EventObjectLocationChange)
+        {
+            if (_styler.IsStyled(window)) _styler.Reassert(window);
+            return;
+        }
         if (eventType == NativeMethods.EventObjectDestroy) { _styler.Forget(window); return; }
         var root = NativeMethods.GetAncestor(window, NativeMethods.GaRoot);
         if (root != window)
@@ -136,9 +160,11 @@ internal sealed class NativeBackdropWorker
 
     private bool ClearsEditors => _profile.IsNotepad && _profile.ExtendIntoClient && TargetWindowStyler.SupportsSystemBackdrop;
 
+    // A burst of re-applies over the next 5 s: apps reset their frame (and Notepad its text area) a moment after
+    // appearing or activating, often after the event that told us about it.
     private void Settle()
     {
-        if (!ClearsEditors) return;
+        if (!_profile.ExtendIntoClient || !_styler.AppliesBackdrop) return;
         _settleTicks = 10;
         _settleTimer.Start();
     }
