@@ -67,6 +67,8 @@ internal static class NativeMethods
     internal const long WsExToolWindow = 0x00000080;
     internal const int WmDpiChanged = 0x02E0;
     internal const int WmNcActivate = 0x0086;
+    internal const int EmSetBkgndColor = 0x0443;
+    internal const uint SmtoAbortIfHung = 0x0002;
     internal static readonly nint DpiAwarenessContextPerMonitorAwareV2 = new(-4);
     internal const int DwmwaUseHostBackdropBrush = 17;
     internal const int DwmwaUseImmersiveDarkMode = 20;
@@ -89,6 +91,8 @@ internal static class NativeMethods
     internal const uint SwpShowWindow = 0x0040;
 
     [DllImport("user32.dll")] internal static extern bool EnumWindows(EnumWindowsProc callback, nint parameter);
+    [DllImport("user32.dll")] internal static extern bool EnumChildWindows(nint parent, EnumWindowsProc callback, nint parameter);
+    [DllImport("user32.dll")] internal static extern nint SendMessageTimeout(nint window, int message, nint wParam, nint lParam, uint flags, uint timeout, out nint result);
     [DllImport("user32.dll")] internal static extern bool IsWindowVisible(nint window);
     [DllImport("user32.dll")] internal static extern bool IsWindow(nint window);
     [DllImport("user32.dll")] internal static extern bool IsIconic(nint window);

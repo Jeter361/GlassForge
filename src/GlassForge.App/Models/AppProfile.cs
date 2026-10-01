@@ -53,6 +53,7 @@ public sealed class AppProfile : INotifyPropertyChanged
     /// content covers, so it only shows once extended into the whole window.
     /// </summary>
     private static readonly HashSet<string> OwnTitleBarApps = new(StringComparer.OrdinalIgnoreCase) { "notepad" };
+    [JsonIgnore] public bool IsNotepad => string.Equals(ProcessName, "notepad", StringComparison.OrdinalIgnoreCase);
     [JsonIgnore] public bool DrawsOwnTitleBar => OwnTitleBarApps.Contains(ProcessName);
     [JsonIgnore] public bool IsExplorer => string.Equals(ProcessName, "explorer", StringComparison.OrdinalIgnoreCase);
     public bool Enabled { get => _enabled; set => Set(ref _enabled, value); }

@@ -50,6 +50,9 @@ internal sealed class NativeBackdropWorker
     private readonly List<nint> _hooks = [];
     private readonly Dictionary<uint, bool> _processMatches = [];
     private HashSet<uint> _processIds = [];
+    // Notepad's text area (a RichEditD2DPT control per tab) and the background each one had before.
+    private readonly Dictionary<nint, nint> _editors = [];
+    private const string NotepadEditorClass = "RichEditD2DPT";
 
     internal System.Windows.Forms.ApplicationContext Context { get; } = new();
 
@@ -83,6 +86,9 @@ internal sealed class NativeBackdropWorker
             if (NativeMethods.GetWindowThreadProcessId(window, out var processId) != 0 && ids.Contains(processId)) TryStyle(window);
             return true;
         }, nint.Zero);
+        // New tabs bring new text controls; closed tabs leave handles behind.
+        foreach (var editor in _editors.Keys.Where(editor => !NativeMethods.IsWindow(editor)).ToArray()) _editors.Remove(editor);
+        foreach (var window in _styler.StyledWindows) ClearEditorBackgrounds(window);
     }
 
     private void OnWindowEvent(nint hook, uint eventType, nint window, int objectId, int childId, uint threadId, uint eventTime)
@@ -90,7 +96,13 @@ internal sealed class NativeBackdropWorker
         if (eventType == NativeMethods.EventSystemForeground) { KeepFramesActive(window); return; }
         if (objectId != NativeMethods.ObjidWindow) return;
         if (eventType == NativeMethods.EventObjectDestroy) { _styler.Forget(window); return; }
-        if (_styler.IsStyled(window) || NativeMethods.GetAncestor(window, NativeMethods.GaRoot) != window) return;
+        var root = NativeMethods.GetAncestor(window, NativeMethods.GaRoot);
+        if (root != window)
+        {
+            if (_styler.IsStyled(root)) ClearEditorBackgrounds(root);
+            return;
+        }
+        if (_styler.IsStyled(window)) return;
         if (NativeMethods.GetWindowThreadProcessId(window, out var processId) == 0) return;
         if (!_processIds.Contains(processId))
         {
@@ -107,7 +119,33 @@ internal sealed class NativeBackdropWorker
     {
         if (!WindowDiscoveryService.IsFramedAppWindow(window) || _styler.IsStyled(window)) return;
         _styler.Apply(window);
+        ClearEditorBackgrounds(window);
         if (KeepsGlass && window != NativeMethods.GetForegroundWindow()) SetFrameActive(window, true);
+    }
+
+    // Notepad paints its text area #272727 with no alpha, which DWM adds onto the glass as a milky haze. Black is the
+    // see-through color inside an extended frame, so the text area then matches the glass around it. Only with the
+    // frame extended: anywhere else black would just be black.
+    private void ClearEditorBackgrounds(nint window)
+    {
+        if (!_profile.IsNotepad || !_profile.ExtendIntoClient || !TargetWindowStyler.SupportsSystemBackdrop) return;
+        NativeMethods.EnumChildWindows(window, (child, _) =>
+        {
+            if (!_editors.ContainsKey(child) && IsClass(child, NotepadEditorClass) &&
+                SetEditorBackground(child, 0, out var previous))
+                _editors[child] = previous;
+            return true;
+        }, nint.Zero);
+    }
+
+    // EM_SETBKGNDCOLOR returns the color it replaces; a hung Notepad is skipped rather than freezing this thread.
+    private static bool SetEditorBackground(nint editor, nint color, out nint previous) =>
+        NativeMethods.SendMessageTimeout(editor, NativeMethods.EmSetBkgndColor, 0, color, NativeMethods.SmtoAbortIfHung, 1000, out previous) != 0;
+
+    private static bool IsClass(nint window, string name)
+    {
+        var text = new System.Text.StringBuilder(32);
+        return NativeMethods.GetClassName(window, text, text.Capacity) > 0 && text.ToString() == name;
     }
 
     private bool KeepsGlass => _profile.KeepGlassWhenUnfocused && _styler.AppliesBackdrop;
@@ -142,6 +180,9 @@ internal sealed class NativeBackdropWorker
             foreach (var window in _styler.StyledWindows)
                 if (window != foreground && NativeMethods.IsWindow(window)) SetFrameActive(window, false);
         }
+        foreach (var (editor, previous) in _editors)
+            if (NativeMethods.IsWindow(editor)) SetEditorBackground(editor, previous, out _);
+        _editors.Clear();
         _styler.RestoreAll();
         _marshal.Dispose();
         Context.ExitThread();
