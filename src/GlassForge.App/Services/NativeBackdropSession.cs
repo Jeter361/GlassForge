@@ -53,6 +53,11 @@ internal sealed class NativeBackdropWorker
     // Notepad's text area (a RichEditD2DPT control per tab) and the background each one had before.
     private readonly Dictionary<nint, nint> _editors = [];
     private const string NotepadEditorClass = "RichEditD2DPT";
+    private const int NotepadEditorBackground = 0x272727; // dark theme default, restored if the original was lost
+    // Notepad applies its theme to a new text area a moment after showing it, over the color set here; a short burst
+    // of re-applies after a window or tab appears catches that without waiting for the discovery timer.
+    private readonly System.Windows.Forms.Timer _settleTimer = new() { Interval = 500 };
+    private int _settleTicks;
 
     internal System.Windows.Forms.ApplicationContext Context { get; } = new();
 
@@ -72,6 +77,11 @@ internal sealed class NativeBackdropWorker
             _hooks.Add(NativeMethods.SetWinEventHook(NativeMethods.EventSystemForeground, NativeMethods.EventSystemForeground,
                 nint.Zero, _callback, 0, 0, NativeMethods.WineventOutOfContext));
         _discoveryTimer.Tick += (_, _) => StyleExistingWindows();
+        _settleTimer.Tick += (_, _) =>
+        {
+            foreach (var window in _styler.StyledWindows) ClearEditorBackgrounds(window);
+            if (--_settleTicks <= 0) _settleTimer.Stop();
+        };
         _discoveryTimer.Start();
         StyleExistingWindows();
     }
@@ -99,7 +109,7 @@ internal sealed class NativeBackdropWorker
         var root = NativeMethods.GetAncestor(window, NativeMethods.GaRoot);
         if (root != window)
         {
-            if (_styler.IsStyled(root)) ClearEditorBackgrounds(root);
+            if (_styler.IsStyled(root) && IsClass(window, NotepadEditorClass)) Settle();
             return;
         }
         if (_styler.IsStyled(window)) return;
@@ -120,20 +130,35 @@ internal sealed class NativeBackdropWorker
         if (!WindowDiscoveryService.IsFramedAppWindow(window) || _styler.IsStyled(window)) return;
         _styler.Apply(window);
         ClearEditorBackgrounds(window);
+        Settle();
         if (KeepsGlass && window != NativeMethods.GetForegroundWindow()) SetFrameActive(window, true);
+    }
+
+    private bool ClearsEditors => _profile.IsNotepad && _profile.ExtendIntoClient && TargetWindowStyler.SupportsSystemBackdrop;
+
+    private void Settle()
+    {
+        if (!ClearsEditors) return;
+        _settleTicks = 10;
+        _settleTimer.Start();
     }
 
     // Notepad paints its text area #272727 with no alpha, which DWM adds onto the glass as a milky haze. Black is the
     // see-through color inside an extended frame, so the text area then matches the glass around it. Only with the
-    // frame extended: anywhere else black would just be black.
+    // frame extended: anywhere else black would just be black. Re-applied on every pass, because Notepad sets its
+    // theme color again after the control appears (and on theme changes); EM_SETBKGNDCOLOR can't be read without
+    // writing, so whatever non-black color it hands back is the one to restore.
     private void ClearEditorBackgrounds(nint window)
     {
-        if (!_profile.IsNotepad || !_profile.ExtendIntoClient || !TargetWindowStyler.SupportsSystemBackdrop) return;
+        if (!ClearsEditors) return;
         NativeMethods.EnumChildWindows(window, (child, _) =>
         {
-            if (!_editors.ContainsKey(child) && IsClass(child, NotepadEditorClass) &&
-                SetEditorBackground(child, 0, out var previous))
-                _editors[child] = previous;
+            if (!IsClass(child, NotepadEditorClass) || !SetEditorBackground(child, 0, out var previous)) return true;
+            // A brand-new control still has the system window color (white) until Notepad themes it: in dark mode that
+            // isn't Notepad's color, and restoring it would leave a glowing white text area.
+            var untouched = previous == (nint)NativeMethods.GetSysColor(NativeMethods.ColorWindow) && AppsUseDarkTheme();
+            if (previous != 0 && !untouched) _editors[child] = previous;
+            else _editors.TryAdd(child, NotepadEditorBackground);
             return true;
         }, nint.Zero);
     }
@@ -141,6 +166,12 @@ internal sealed class NativeBackdropWorker
     // EM_SETBKGNDCOLOR returns the color it replaces; a hung Notepad is skipped rather than freezing this thread.
     private static bool SetEditorBackground(nint editor, nint color, out nint previous) =>
         NativeMethods.SendMessageTimeout(editor, NativeMethods.EmSetBkgndColor, 0, color, NativeMethods.SmtoAbortIfHung, 1000, out previous) != 0;
+
+    private static bool AppsUseDarkTheme()
+    {
+        using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+        return key?.GetValue("AppsUseLightTheme") is int light && light == 0;
+    }
 
     private static bool IsClass(nint window, string name)
     {
@@ -174,6 +205,7 @@ internal sealed class NativeBackdropWorker
         foreach (var hook in _hooks) if (hook != nint.Zero) NativeMethods.UnhookWinEvent(hook);
         _hooks.Clear();
         _discoveryTimer.Dispose();
+        _settleTimer.Dispose();
         if (KeepsGlass)
         {
             var foreground = NativeMethods.GetForegroundWindow();
