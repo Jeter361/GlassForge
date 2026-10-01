@@ -44,6 +44,8 @@ var terminal = new AppProfile { ProcessName = "WindowsTerminal", HookGlass = tru
 Check(terminal.HookWindowClass == "CASCADIA_HOSTING_WINDOW_CLASS" && new AppProfile { ProcessName = "explorer" }.HookWindowClass == "CabinetWClass" && new AppProfile { ProcessName = "olk" }.HookWindowClass is null, "Only Explorer and Terminal have a hook mode.");
 Check(System.Text.Json.JsonSerializer.Serialize(terminal).Contains("\"ExplorerGlass\":true"), "The hook option keeps its saved name, so existing Explorer profiles still load it.");
 
+Check(new AppProfile { ProcessName = "SystemSettings" }.HookWindowClass == AppProfile.UwpContentWindowClass, "Settings hooks its UWP content window.");
+
 bool MediaMatch(string id, string process) => MediaPlaybackMonitor.Matches(id, MediaPlaybackMonitor.Normalize(process));
 Check(MediaMatch("Chrome", "chrome"), "Chrome media sessions match chrome.exe.");
 Check(MediaMatch("Chrome.UserData.Default", "chrome"), "Profile-specific Chrome session IDs match.");

@@ -14,6 +14,10 @@ public sealed class WindowDiscoveryService
         {
             if (!NativeMethods.IsWindowVisible(window)) return true;
             NativeMethods.GetWindowThreadProcessId(window, out var processId);
+            // UWP apps (Settings, Calculator) show up as ApplicationFrameHost's frame; list the app inside instead.
+            var content = NativeMethods.FindWindowEx(window, nint.Zero, AppProfile.UwpContentWindowClass, null);
+            if (content != nint.Zero && NativeMethods.GetWindowThreadProcessId(content, out var hostedId) != 0 && hostedId != processId)
+                processId = hostedId;
             var title = new StringBuilder(512);
             NativeMethods.GetWindowText(window, title, title.Capacity);
             if (!NativeMethods.GetWindowRect(window, out var rect)) return true;
@@ -25,7 +29,8 @@ public sealed class WindowDiscoveryService
                 var name = process.ProcessName;
                 if (string.Equals(name, "GlassForge", StringComparison.OrdinalIgnoreCase)) return true;
                 var windowTitle = title.ToString();
-                var displayName = !string.IsNullOrWhiteSpace(process.MainWindowTitle)
+                var displayName = content != nint.Zero && !string.IsNullOrWhiteSpace(windowTitle) ? windowTitle
+                    : !string.IsNullOrWhiteSpace(process.MainWindowTitle)
                     ? process.MainWindowTitle
                     : !string.IsNullOrWhiteSpace(windowTitle) ? windowTitle : name;
                 results.TryAdd(name, new RunningApplication(

@@ -28,14 +28,16 @@ std::atomic<bool> connecting{false};
 HMODULE ownModule = nullptr;
 // Every Explorer window has its own UI thread; only elements on hooked threads are styled.
 SRWLOCK threadLock = SRWLOCK_INIT;
-std::set<DWORD> targetThreads;
+std::map<DWORD, XamlStyle> targetThreads;
 class Tap;
 SRWLOCK tapLock = SRWLOCK_INIT;
 std::vector<ComPtr<Tap>> taps;
 
-bool IsTargetThread(DWORD thread) {
+bool IsTargetThread(DWORD thread, XamlStyle* style = nullptr) {
     AcquireSRWLockShared(&threadLock);
-    const bool found = targetThreads.count(thread) != 0;
+    const auto entry = targetThreads.find(thread);
+    const bool found = entry != targetThreads.end();
+    if (found && style) *style = entry->second;
     ReleaseSRWLockShared(&threadLock);
     return found;
 }
@@ -145,6 +147,51 @@ class Tap final : public RuntimeClass<RuntimeClassFlags<ClassicCom>, IObjectWith
         Log(L"XAML background %s#%s %08X", node.type.c_str(), node.name.c_str(), result);
         if (SUCCEEDED(result)) saved.push_back(std::move(record));
     }
+    // Survey aid: a brush's Color and Opacity, read from its own property chain.
+    std::wstring BrushColor(InstanceHandle brush) {
+        std::wstring text;
+        unsigned sourceCount = 0, propertyCount = 0;
+        PropertyChainSource* sources = nullptr;
+        PropertyChainValue* properties = nullptr;
+        if (!brush || FAILED(service->GetPropertyValuesChain(brush, &sourceCount, &sources, &propertyCount, &properties))) return L"?";
+        for (unsigned i=0; i<propertyCount; ++i) {
+            const auto& property = properties[i];
+            if (property.PropertyName && property.Value && (wcscmp(property.PropertyName, L"Color") == 0 ||
+                wcscmp(property.PropertyName, L"Opacity") == 0 || wcscmp(property.PropertyName, L"TintColor") == 0))
+                text += std::wstring(property.PropertyName) + L":" + property.Value + L" ";
+            SysFreeString(property.Type); SysFreeString(property.DeclaringType); SysFreeString(property.ValueType);
+            SysFreeString(property.ItemType); SysFreeString(property.Value); SysFreeString(property.PropertyName);
+        }
+        for (unsigned i=0; i<sourceCount; ++i) {
+            SysFreeString(sources[i].TargetType); SysFreeString(sources[i].Name);
+            SysFreeString(sources[i].SrcInfo.FileName); SysFreeString(sources[i].SrcInfo.Hash);
+        }
+        CoTaskMemFree(properties); CoTaskMemFree(sources);
+        return text;
+    }
+
+    // Survey aid: every element whose Background (or Fill) is set to something, with its value type and source.
+    void LogBackground(InstanceHandle element, const Node& node) {
+        unsigned sourceCount = 0, propertyCount = 0;
+        PropertyChainSource* sources = nullptr;
+        PropertyChainValue* properties = nullptr;
+        if (FAILED(service->GetPropertyValuesChain(element, &sourceCount, &sources, &propertyCount, &properties))) return;
+        for (unsigned i=0; i<propertyCount; ++i) {
+            const auto& property = properties[i];
+            const bool brush = property.PropertyName && (wcscmp(property.PropertyName, L"Background") == 0 || wcscmp(property.PropertyName, L"Fill") == 0);
+            if (brush && property.Value && wcscmp(property.Value, L"0") != 0 && property.PropertyChainIndex < sourceCount)
+                Log(L"XAML brush %s#%s %s=%s (%s source %d)", node.type.c_str(), node.name.c_str(), property.PropertyName,
+                    BrushColor(_wcstoui64(property.Value, nullptr, 10)).c_str(), property.ValueType ? property.ValueType : L"?",
+                    static_cast<int>(sources[property.PropertyChainIndex].Source));
+            SysFreeString(property.Type); SysFreeString(property.DeclaringType); SysFreeString(property.ValueType);
+            SysFreeString(property.ItemType); SysFreeString(property.Value); SysFreeString(property.PropertyName);
+        }
+        for (unsigned i=0; i<sourceCount; ++i) {
+            SysFreeString(sources[i].TargetType); SysFreeString(sources[i].Name);
+            SysFreeString(sources[i].SrcInfo.FileName); SysFreeString(sources[i].SrcInfo.Hash);
+        }
+        CoTaskMemFree(properties); CoTaskMemFree(sources);
+    }
 public:
     HRESULT STDMETHODCALLTYPE SetSite(IUnknown* newSite) override {
         site = newSite;
@@ -187,14 +234,16 @@ public:
         const DWORD thread = GetCurrentThreadId();
         Node node{relation.Parent, element.Type ? element.Type : L"", element.Name ? element.Name : L"", thread};
         nodes[element.Handle] = node;
-        if (!IsTargetThread(thread)) return S_OK;
-        if (logged < 1400 && (node.type.find(L"FileExplorer") != std::wstring::npos ||
+        XamlStyle style;
+        if (!IsTargetThread(thread, &style)) return S_OK;
+        if (logged < 1400 && (style.logAll || node.type.find(L"FileExplorer") != std::wstring::npos ||
             node.type.find(L"Gallery") != std::wstring::npos)) {
             ++logged;
             Log(L"XAML node thread=%lu parent=%llu handle=%llu type=%s name=%s", thread,
                 relation.Parent, element.Handle, node.type.c_str(), node.name.c_str());
         }
-        if (diagnostics) Style(element.Handle, node);
+        if (diagnostics && style.app == XamlApp::Explorer) Style(element.Handle, node);
+        if (diagnostics && style.logAll && style.app != XamlApp::Explorer) LogBackground(element.Handle, node);
         return S_OK;
     }
     // Only the calling thread's records: XAML properties must be set on the element's own thread.
@@ -234,14 +283,21 @@ DWORD WINAPI Connect(void*) {
     const HRESULT initialized = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     wchar_t path[MAX_PATH]{};
     GetModuleFileNameW(ownModule, path, _countof(path));
+    // WinUI 3 apps (Explorer) expose diagnostics from the Windows App SDK framework; UWP apps (Settings) from system
+    // XAML, under a different connection name.
     HMODULE runtime = GetModuleHandleW(L"Microsoft.Internal.FrameworkUdk.dll");
+    const wchar_t* prefix = L"WinUIVisualDiagConnection";
+    if (!runtime) {
+        runtime = GetModuleHandleW(L"Windows.UI.Xaml.dll");
+        prefix = L"VisualDiagConnection";
+    }
     const auto initialize = runtime ? reinterpret_cast<decltype(&InitializeXamlDiagnosticsEx)>(
         GetProcAddress(runtime, "InitializeXamlDiagnosticsEx")) : nullptr;
     HRESULT result = HRESULT_FROM_WIN32(ERROR_MOD_NOT_FOUND);
     if (initialize) {
         for (int index = 1; index <= 64 && active; ++index) {
             wchar_t connection[80];
-            swprintf_s(connection, L"WinUIVisualDiagConnection%d", index);
+            swprintf_s(connection, L"%s%d", prefix, index);
             result = initialize(connection, GetCurrentProcessId(), L"", path, TapClass, nullptr);
             if (result != HRESULT_FROM_WIN32(ERROR_NOT_FOUND)) break;
         }
@@ -253,10 +309,10 @@ DWORD WINAPI Connect(void*) {
 }
 }
 
-void AddXamlThread(HMODULE module, DWORD thread) {
+void AddXamlThread(HMODULE module, DWORD thread, const XamlStyle& style) {
     ownModule = module;
     AcquireSRWLockExclusive(&threadLock);
-    targetThreads.insert(thread);
+    targetThreads[thread] = style;
     ReleaseSRWLockExclusive(&threadLock);
     active = true;
     // One diagnostics connection serves every thread in the process. It retains the TAP DLL; keep that lifetime

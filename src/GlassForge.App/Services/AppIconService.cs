@@ -66,7 +66,10 @@ internal static class AppIconService
     {
         if (string.IsNullOrEmpty(executablePath)) return processId != 0 ? FromWindow(processId) : null;
         if (Cache.TryGetValue(executablePath, out var cached)) return cached;
-        var icon = FromFile(executablePath) ?? (processId != 0 ? FromWindow(processId) : null);
+        // Packaged apps (Settings, Terminal, Notepad) have a Start menu icon; their exe's own may be generic or absent.
+        var packaged = processId != 0 ? ProcessAppId(processId) : null;
+        var icon = (packaged is null ? null : FromShellItem(@"shell:AppsFolder\" + packaged))
+            ?? FromFile(executablePath) ?? (processId != 0 ? FromWindow(processId) : null);
         Cache[executablePath] = icon;
         return icon;
     }
@@ -113,6 +116,12 @@ internal static class AppIconService
         var core = FindWindowEx(frame, nint.Zero, "Windows.UI.Core.CoreWindow", null);
         if (core == nint.Zero) return null;
         GetWindowThreadProcessId(core, out var processId);
+        return ProcessAppId(processId);
+    }
+
+    // The package identity (AppUserModelID) of a packaged app's process; null for classic desktop apps.
+    private static string? ProcessAppId(int processId)
+    {
         var process = OpenProcess(ProcessQueryLimitedInformation, false, processId);
         if (process == nint.Zero) return null;
         try

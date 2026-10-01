@@ -18,17 +18,23 @@ internal sealed class ExplorerHookSession : IGlassSession
     private Thread? _thread;
     private ExplorerHookWorker? _worker;
     private readonly string _windowClass;
+    private readonly string _processName;
 
-    /// <param name="windowClass">Top-level window class to hook: CabinetWClass (File Explorer) or
-    /// CASCADIA_HOSTING_WINDOW_CLASS (Windows Terminal, frame only).</param>
-    internal ExplorerHookSession(string windowClass) => _windowClass = windowClass;
+    /// <param name="windowClass">Window class to hook: CabinetWClass (File Explorer), CASCADIA_HOSTING_WINDOW_CLASS
+    /// (Windows Terminal, frame only) or Windows.UI.Core.CoreWindow (UWP apps such as Settings, inside their frame).</param>
+    /// <param name="processName">The app's process; UWP content windows of other apps share the class.</param>
+    internal ExplorerHookSession(string windowClass, string processName)
+    {
+        _windowClass = windowClass;
+        _processName = processName;
+    }
     private readonly ManualResetEventSlim _ready = new();
 
     public void Start()
     {
         _thread = new Thread(() =>
         {
-            try { _worker = new ExplorerHookWorker(_windowClass); }
+            try { _worker = new ExplorerHookWorker(_windowClass, _processName); }
             finally { _ready.Set(); }
             System.Windows.Forms.Application.Run(_worker.Context);
         }) { IsBackground = true, Name = "GlassForge explorer hook" };
@@ -50,6 +56,8 @@ internal sealed class ExplorerHookWorker
     private const int WhGetMessage = 3;
     private const int WmNull = 0;
     private readonly string _windowClass;
+    private readonly string _processName;
+    private readonly bool _uwp;
     private static readonly int AttachMessage = NativeMethods.RegisterWindowMessage("GlassForge.Hook.Attach");
     private static readonly int DetachMessage = NativeMethods.RegisterWindowMessage("GlassForge.Hook.Detach");
 
@@ -64,9 +72,11 @@ internal sealed class ExplorerHookWorker
 
     internal System.Windows.Forms.ApplicationContext Context { get; } = new();
 
-    internal ExplorerHookWorker(string windowClass)
+    internal ExplorerHookWorker(string windowClass, string processName)
     {
         _windowClass = windowClass;
+        _processName = processName;
+        _uwp = windowClass == AppProfile.UwpContentWindowClass;
         _ = _marshal.Handle; // Creates the window that Stop() marshals onto.
         _callback = OnWindowShown;
         var path = HookLibrary.Extract();
@@ -90,7 +100,13 @@ internal sealed class ExplorerHookWorker
             NativeMethods.UnhookWindowsHookEx(entry.Hook);
             _threads.Remove(thread);
         }
-        NativeMethods.EnumWindows((window, _) => { TryHook(window); return true; }, nint.Zero);
+        NativeMethods.EnumWindows((window, _) =>
+        {
+            TryHook(window);
+            // A UWP app's content window sits inside ApplicationFrameHost's frame, not at the top level.
+            if (_uwp) TryHook(NativeMethods.FindWindowEx(window, nint.Zero, _windowClass, null));
+            return true;
+        }, nint.Zero);
     }
 
     private void OnWindowShown(nint hook, uint eventType, nint window, int objectId, int childId, uint threadId, uint eventTime)
@@ -113,9 +129,12 @@ internal sealed class ExplorerHookWorker
 
     private bool IsHookedWindow(nint window)
     {
-        if (NativeMethods.GetAncestor(window, NativeMethods.GaRoot) != window) return false;
-        var name = new StringBuilder(32);
-        return NativeMethods.GetClassName(window, name, name.Capacity) > 0 && name.ToString() == _windowClass;
+        if (window == nint.Zero || (!_uwp && NativeMethods.GetAncestor(window, NativeMethods.GaRoot) != window)) return false;
+        var name = new StringBuilder(64);
+        if (NativeMethods.GetClassName(window, name, name.Capacity) == 0 || name.ToString() != _windowClass) return false;
+        // Every UWP app has a CoreWindow; only this profile's app is ours.
+        return !_uwp || (NativeMethods.GetWindowThreadProcessId(window, out var processId) != 0 &&
+            WindowDiscoveryService.IsProcessNamed(processId, _processName));
     }
 
     internal void Stop()

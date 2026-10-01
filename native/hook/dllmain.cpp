@@ -20,6 +20,7 @@
 #include "detours.h"
 #include "log.h"
 #include "xaml.h"
+#include "uwp.h"
 
 namespace
 {
@@ -53,6 +54,17 @@ namespace
     // native ones underneath, slightly offset. DWM only draws them for windows with a system menu, so the style is
     // dropped while the glass is on (Alt+Space loses the menu; the app's own buttons and the taskbar still work).
     thread_local bool t_removedSysMenu = false;
+    // UWP apps (Settings): XAML styling only. Their frame window belongs to ApplicationFrameHost, another process,
+    // so it can't be subclassed from here; a thread timer drives the XAML refresh instead.
+    thread_local bool t_xamlOnly = false;
+    thread_local UINT_PTR t_threadTimer = 0;
+
+    bool OwnsWindow(HWND window)
+    {
+        DWORD process = 0;
+        GetWindowThreadProcessId(window, &process);
+        return process == GetCurrentProcessId();
+    }
 
     void SetSysMenu(HWND window, bool on)
     {
@@ -79,7 +91,7 @@ namespace
 
     bool IsTargetDC(HDC dc)
     {
-        if (!t_root || t_frameOnly) return false;
+        if (!t_root || t_frameOnly || t_xamlOnly) return false;
         if (const HWND window = WindowFromDC(dc))
             return GetAncestor(window, GA_ROOT) == t_root;
         AcquireSRWLockShared(&g_dcLock);
@@ -636,8 +648,11 @@ namespace
         Real_DwmSetWindowAttribute(root, DWMWA_SYSTEMBACKDROP_TYPE, &Acrylic, sizeof Acrylic);
         const MARGINS glass = GlassMargins(root);
         Real_DwmExtendFrameIntoClientArea(root, &glass);
-        SetWindowSubclass(root, RootSubclass, SubclassId, 0);
-        DefSubclassProc(root, WM_NCACTIVATE, TRUE, 0);
+        if (OwnsWindow(root))
+        {
+            SetWindowSubclass(root, RootSubclass, SubclassId, 0);
+            DefSubclassProc(root, WM_NCACTIVATE, TRUE, 0);
+        }
         RedrawWindow(root, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN);
         Log(L"glass applied to %p on thread %lu (backdrop was %d)", root, GetCurrentThreadId(), original);
         if (t_frameOnly)
@@ -646,8 +661,13 @@ namespace
             if (t_removedSysMenu) SetSysMenu(root, false);
             return;
         }
-        AddXamlThread(g_module, GetCurrentThreadId());
-        SetTimer(root, XamlTimerId, 1000, nullptr);
+        XamlStyle style;
+        style.app = t_xamlOnly ? XamlApp::Settings : XamlApp::Explorer;
+        style.logAll = g_survey;
+        AddXamlThread(g_module, GetCurrentThreadId(), style);
+        if (OwnsWindow(root)) SetTimer(root, XamlTimerId, 1000, nullptr);
+        else t_threadTimer = SetTimer(nullptr, 0, 1000, nullptr);
+        if (t_xamlOnly) ApplyUwpGlass(t_root);
     }
 
     // Also runs on the window's thread; returns whether any styled window is left in the process. A window being
@@ -663,7 +683,9 @@ namespace
             int original = entry != g_roots.end() ? entry->second : 0;
             if (entry != g_roots.end()) g_roots.erase(entry);
             ReleaseSRWLockExclusive(&g_rootLock);
-            if (IsWindow(root))
+            if (t_threadTimer) KillTimer(nullptr, std::exchange(t_threadTimer, 0));
+            if (t_xamlOnly && !destroying) RestoreUwpBackdrop();
+            if (IsWindow(root) && OwnsWindow(root))
             {
                 KillTimer(root, XamlTimerId);
                 RemoveWindowSubclass(root, RootSubclass, SubclassId);
@@ -675,7 +697,7 @@ namespace
                 Real_DwmSetWindowAttribute(root, DWMWA_SYSTEMBACKDROP_TYPE, &original, sizeof original);
                 constexpr MARGINS none{};
                 Real_DwmExtendFrameIntoClientArea(root, &none);
-                SendMessageW(root, WM_DWMCOMPOSITIONCHANGED, 0, 0);
+                PostMessageW(root, WM_DWMCOMPOSITIONCHANGED, 0, 0);
                 RedrawWindow(root, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN);
             }
             Log(L"glass removed from %p", root);
@@ -684,6 +706,14 @@ namespace
         const bool others = !g_roots.empty();
         ReleaseSRWLockShared(&g_rootLock);
         return others;
+    }
+
+    bool IsProcessNamed(const wchar_t* exe)
+    {
+        wchar_t path[MAX_PATH]{};
+        GetModuleFileNameW(nullptr, path, MAX_PATH);
+        const wchar_t* name = wcsrchr(path, L'\\');
+        return _wcsicmp(name ? name + 1 : path, exe) == 0;
     }
 
     bool SurveyRequested()
@@ -792,12 +822,20 @@ extern "C" __declspec(dllexport) LRESULT CALLBACK GlassForgeGetMessageProc(int c
             GetClassNameW(root, name, _countof(name));
             // File Explorer folder windows get the full treatment; Windows Terminal only the frame (see t_frameOnly).
             const bool terminal = _wcsicmp(name, L"CASCADIA_HOSTING_WINDOW_CLASS") == 0;
-            if (_wcsicmp(name, L"CabinetWClass") == 0 || terminal)
+            // UWP Settings: the hook runs on its CoreWindow thread; the root is ApplicationFrameHost's frame.
+            const bool settings = _wcsicmp(name, L"ApplicationFrameWindow") == 0 && IsProcessNamed(L"SystemSettings.exe");
+            if (_wcsicmp(name, L"CabinetWClass") == 0 || terminal || settings)
             {
                 t_frameOnly = terminal;
+                t_xamlOnly = settings;
                 Install();
                 if (g_installed) ApplyGlass(root);
             }
+        }
+        if (message->message == WM_TIMER && !message->hwnd && t_threadTimer && message->wParam == t_threadTimer)
+        {
+            RefreshXamlStyling();
+            if (t_xamlOnly) ApplyUwpGlass(t_root);
         }
         if (message->message == g_dumpMessage) Dump();
         else if (message->message == g_detachMessage)
@@ -819,7 +857,9 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID)
         Log(L"loaded");
         break;
     case DLL_PROCESS_DETACH:
-        // Never leave detours pointing into an unloaded DLL; GlassForge normally sends Detach first.
+        // Never leave detours (or a redirected UWP method) pointing into an unloaded DLL; GlassForge normally sends
+        // Detach first.
+        UndoUwpRedirect();
         Uninstall();
         Log(L"unloaded");
         break;
