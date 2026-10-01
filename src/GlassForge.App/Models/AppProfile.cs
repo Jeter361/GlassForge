@@ -41,6 +41,7 @@ public sealed class AppProfile : INotifyPropertyChanged
     private bool _extendIntoClient;
     private CornerStyle _corners;
     private TitleBarTheme _titleBar;
+    private bool _keepGlassWhenUnfocused = true;
 
     public Guid Id { get; set; } = Guid.NewGuid();
     public string DisplayName { get => _displayName; set => Set(ref _displayName, value); }
@@ -55,6 +56,7 @@ public sealed class AppProfile : INotifyPropertyChanged
     public bool ExtendIntoClient { get => _extendIntoClient; set => Set(ref _extendIntoClient, value); }
     public CornerStyle Corners { get => _corners; set => Set(ref _corners, value); }
     public TitleBarTheme TitleBar { get => _titleBar; set => Set(ref _titleBar, value); }
+    public bool KeepGlassWhenUnfocused { get => _keepGlassWhenUnfocused; set => Set(ref _keepGlassWhenUnfocused, value); }
 
     [JsonIgnore] public string OpacityLabel => $"{Math.Round(WindowOpacity / 255d * 100)}%";
     [JsonIgnore] public string Initial => string.IsNullOrWhiteSpace(DisplayName) ? "?" : DisplayName.TrimStart()[..1].ToUpperInvariant();
@@ -78,6 +80,7 @@ public sealed class AppProfile : INotifyPropertyChanged
         TintColor = DefaultTintColor;
         Backdrop = NativeBackdrop.Acrylic;
         ExtendIntoClient = false;
+        KeepGlassWhenUnfocused = true;
         Corners = CornerStyle.Default;
         TitleBar = TitleBarTheme.Default;
     }

@@ -26,6 +26,7 @@ var json = System.Text.Json.JsonSerializer.Serialize(styled);
 Check(json.Contains("\"Mode\":\"Native\"") && json.Contains("\"Backdrop\":\"MicaAlt\""), "Enums save as readable names.");
 var legacy = System.Text.Json.JsonSerializer.Deserialize<AppProfile>("{\"DisplayName\":\"Old\",\"ProcessName\":\"olk\",\"WindowOpacity\":200}")!;
 Check(legacy.Mode == GlassMode.Host && legacy.WindowOpacity == 200, "Profiles saved by older versions load as glass host profiles.");
+Check(profile.KeepGlassWhenUnfocused && legacy.KeepGlassWhenUnfocused, "Native glass stays live when unfocused by default, including for older profiles.");
 
 var converter = new GlassForge.Converters.EnumMatchConverter();
 Check(converter.Convert(GlassMode.Native, typeof(bool), "Native", null!) is true, "Segment buttons check for their own value.");

@@ -238,6 +238,11 @@
                     <StackPanel><TextBlock Text="Extend into the whole window" FontSize="13" /><TextBlock Text="Lets the material show through anywhere the app leaves blank. Classic Win32 apps can draw text oddly with this on." FontSize="12" Foreground="{StaticResource SubtleBrush}" TextWrapping="Wrap" Margin="0,2,12,0" /></StackPanel>
                     <CheckBox Grid.Column="1" IsChecked="{Binding ExtendIntoClient}" VerticalAlignment="Center" />
                   </Grid>
+                  <Grid Margin="0,16,0,0">
+                    <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                    <StackPanel><TextBlock Text="Keep glass when unfocused" FontSize="13" /><TextBlock Text="Windows normally swaps the material for a flat color when you click away. This keeps the frame drawn as active, so the glass stays live." FontSize="12" Foreground="{StaticResource SubtleBrush}" TextWrapping="Wrap" Margin="0,2,12,0" /></StackPanel>
+                    <CheckBox Grid.Column="1" IsChecked="{Binding KeepGlassWhenUnfocused}" VerticalAlignment="Center" />
+                  </Grid>
                 </StackPanel>
 
                 <StackPanel Style="{StaticResource HostOnly}">

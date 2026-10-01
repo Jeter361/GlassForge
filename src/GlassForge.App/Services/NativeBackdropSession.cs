@@ -65,6 +65,9 @@ internal sealed class NativeBackdropWorker
             nint.Zero, _callback, 0, 0, NativeMethods.WineventOutOfContext));
         _hooks.Add(NativeMethods.SetWinEventHook(NativeMethods.EventObjectDestroy, NativeMethods.EventObjectDestroy,
             nint.Zero, _callback, 0, 0, NativeMethods.WineventOutOfContext));
+        if (KeepsGlass)
+            _hooks.Add(NativeMethods.SetWinEventHook(NativeMethods.EventSystemForeground, NativeMethods.EventSystemForeground,
+                nint.Zero, _callback, 0, 0, NativeMethods.WineventOutOfContext));
         _discoveryTimer.Tick += (_, _) => StyleExistingWindows();
         _discoveryTimer.Start();
         StyleExistingWindows();
@@ -84,6 +87,7 @@ internal sealed class NativeBackdropWorker
 
     private void OnWindowEvent(nint hook, uint eventType, nint window, int objectId, int childId, uint threadId, uint eventTime)
     {
+        if (eventType == NativeMethods.EventSystemForeground) { KeepFramesActive(window); return; }
         if (objectId != NativeMethods.ObjidWindow) return;
         if (eventType == NativeMethods.EventObjectDestroy) { _styler.Forget(window); return; }
         if (_styler.IsStyled(window) || NativeMethods.GetAncestor(window, NativeMethods.GaRoot) != window) return;
@@ -101,8 +105,24 @@ internal sealed class NativeBackdropWorker
     // Only framed app windows: tooltips, menus and overlays would get a stray backdrop.
     private void TryStyle(nint window)
     {
-        if (WindowDiscoveryService.IsFramedAppWindow(window)) _styler.Apply(window);
+        if (!WindowDiscoveryService.IsFramedAppWindow(window) || _styler.IsStyled(window)) return;
+        _styler.Apply(window);
+        if (KeepsGlass && window != NativeMethods.GetForegroundWindow()) SetFrameActive(window, true);
     }
+
+    private bool KeepsGlass => _profile.KeepGlassWhenUnfocused && _styler.AppliesBackdrop;
+
+    // Windows swaps Acrylic for a flat fill once a window is deactivated. Deactivation arrives as WM_NCACTIVATE(FALSE);
+    // answering it with WM_NCACTIVATE(TRUE) makes DWM draw the frame, and so the backdrop, as active again. This only
+    // changes how the frame is drawn: keyboard focus and the real foreground window are untouched.
+    private void KeepFramesActive(nint foreground)
+    {
+        foreach (var window in _styler.StyledWindows)
+            if (window != foreground) SetFrameActive(window, true);
+    }
+
+    private static void SetFrameActive(nint window, bool active) =>
+        NativeMethods.PostMessage(window, NativeMethods.WmNcActivate, active ? 1 : 0, nint.Zero);
 
     internal void Stop()
     {
@@ -116,6 +136,12 @@ internal sealed class NativeBackdropWorker
         foreach (var hook in _hooks) if (hook != nint.Zero) NativeMethods.UnhookWinEvent(hook);
         _hooks.Clear();
         _discoveryTimer.Dispose();
+        if (KeepsGlass)
+        {
+            var foreground = NativeMethods.GetForegroundWindow();
+            foreach (var window in _styler.StyledWindows)
+                if (window != foreground && NativeMethods.IsWindow(window)) SetFrameActive(window, false);
+        }
         _styler.RestoreAll();
         _marshal.Dispose();
         Context.ExitThread();

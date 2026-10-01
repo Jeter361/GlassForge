@@ -38,6 +38,10 @@ internal sealed class TargetWindowStyler
 
     internal bool IsStyled(nint window) => _touched.ContainsKey(window);
 
+    internal IEnumerable<nint> StyledWindows => _touched.Keys;
+
+    internal bool AppliesBackdrop => _applyBackdrop;
+
     /// <summary>Styles a window once; DWM keeps the attributes until the window closes or they are reset.</summary>
     internal void Apply(nint window)
     {
