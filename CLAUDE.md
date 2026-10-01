@@ -1,0 +1,24 @@
+# GlassForge: notes for agents
+
+GlassForge (C# / .NET 8 WPF) puts live acrylic glass behind Windows apps. Most of it works from outside the app (DWM attributes, a glass host window). A few apps need the opt-in hook in `native/hook` (C++, Microsoft Detours), loaded only when the user ticks the app's experimental toggle.
+
+**Read `docs/GLASS_WRITEUP.md` before changing any glass behavior.** It records what was tried for each app, what failed, and why the current approach was chosen. Work is on branch `feat/hybrid-backdrop`.
+
+## Windows Settings glass: the flagship feature
+
+The user considers this the best-looking feature so far. Treat it carefully and verify by eye with the user after any change; screen captures can't show DWM glass.
+
+- **Explanation:** `docs/GLASS_WRITEUP.md`, section "Windows Settings: working". It covers why Settings showed only static Mica, what was tried, and why the final approach works and stays glass when unfocused.
+- **Core code:** `native/hook/uwp.cpp` (and `uwp.h`): replacing Settings' backdrop brush, keeping it in place, and restoring it on detach or unload.
+- **Hook wiring:** `native/hook/dllmain.cpp` (`t_xamlOnly`, detection of `ApplicationFrameWindow` in `SystemSettings.exe`, timer re-check, restore on detach), `native/hook/xaml.cpp` (system XAML connection via `Windows.UI.Xaml.dll`).
+- **App side:** `src/GlassForge.App/Models/AppProfile.cs` (`IsSettings`, `UwpContentWindowClass`), `Services/ExplorerHookSession.cs` (finds the Settings content window inside its frame), `Services/WindowDiscoveryService.cs` (lists Settings under its own name), `MainWindow.xaml` ("Glass background" toggle and warning).
+- **Commit:** `832a571` (its message says WIP; it was confirmed working afterwards).
+- **Not yet verified:** turning it off restores Mica; minimize/restore; closing and reopening Settings; theme changes.
+
+## Working on this repo
+
+- Build the hook before the app (the app embeds the DLL): `cmake --build native/build --config Release`, then `dotnet build src/GlassForge.App -c Debug --source https://api.nuget.org/v3/index.json`, then `dotnet run --project tests/GlassForge.Tests`.
+- Exit a running GlassForge first (the exe is locked): set the named event `Local\GlassForge.ExitRequest`.
+- Edit `%LOCALAPPDATA%\GlassForge\profiles.json` only while GlassForge is stopped; a running copy can save its older list over your edit.
+- The repo is public and the README promises "no injection" for the default experience. Ask before pushing; the README must name the opt-in hook features first.
+- Never commit `docs/Images/Screenshot 2026-09-24 *.png` (personal information).
