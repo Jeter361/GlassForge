@@ -6,13 +6,14 @@
   <Application.Resources>
     <conv:EnumMatchConverter x:Key="EnumMatch" />
     <!-- Palette -->
-    <SolidColorBrush x:Key="PageBrush" Color="#DC0C0C10" />
+    <!-- A light tint over the window's live Acrylic: low enough that the glass reads, like Explorer and Terminal. -->
+    <SolidColorBrush x:Key="PageBrush" Color="#400C0C10" />
     <SolidColorBrush x:Key="PanelBrush" Color="#0AFFFFFF" />
     <SolidColorBrush x:Key="RaisedBrush" Color="#10FFFFFF" />
     <SolidColorBrush x:Key="InputBrush" Color="#66000000" />
     <SolidColorBrush x:Key="TextBrush" Color="#F3F2F7" />
-    <SolidColorBrush x:Key="MutedBrush" Color="#9C99A8" />
-    <SolidColorBrush x:Key="SubtleBrush" Color="#6C6977" />
+    <SolidColorBrush x:Key="MutedBrush" Color="#D2D0DB" />
+    <SolidColorBrush x:Key="SubtleBrush" Color="#ABA8B8" />
     <SolidColorBrush x:Key="AccentBrush" Color="#8B5CF6" />
     <SolidColorBrush x:Key="SuccessBrush" Color="#4ADE80" />
     <SolidColorBrush x:Key="DangerBrush" Color="#F87171" />

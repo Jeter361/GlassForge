@@ -37,7 +37,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         SelectedProfile = Profiles.FirstOrDefault();
         DataContext = this;
         InitializeComponent();
-        SourceInitialized += (_, _) => WindowBackdropService.Apply(this);
+        SourceInitialized += (_, _) =>
+        {
+            WindowBackdropService.Apply(this);
+            WindowBackdropService.KeepGlassWhenInactive(this);
+        };
         StartupCheckBox.IsChecked = StartupService.IsEnabled;
         RefreshRunningApplications();
         UpdateColorControls();

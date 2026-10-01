@@ -19,6 +19,24 @@ internal static class WindowBackdropService
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] private static extern nint SetWindowLongPtr(nint window, int index, nint value);
     [DllImport("user32.dll")] private static extern bool SetWindowPos(nint window, nint after, int x, int y, int cx, int cy, uint flags);
 
+    /// <summary>
+    /// Keeps the frame drawn as active, so Windows doesn't swap the Acrylic for a flat fill when GlassForge loses
+    /// focus (the same trick the hook uses inside Explorer and Terminal). Call once per window.
+    /// </summary>
+    internal static void KeepGlassWhenInactive(Window window)
+    {
+        if (HwndSource.FromHwnd(new WindowInteropHelper(window).Handle) is not { } source) return;
+        const int wmNcActivate = 0x0086;
+        source.AddHook((nint hwnd, int message, nint wParam, nint lParam, ref bool handled) =>
+        {
+            if (message != wmNcActivate || wParam != 0) return nint.Zero;
+            handled = true;
+            return DefWindowProc(hwnd, message, 1, lParam);
+        });
+    }
+
+    [DllImport("user32.dll", EntryPoint = "DefWindowProcW")] private static extern nint DefWindowProc(nint window, int message, nint wParam, nint lParam);
+
     internal static void Apply(Window window)
     {
         var handle = new WindowInteropHelper(window).Handle;
