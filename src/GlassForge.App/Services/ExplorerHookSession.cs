@@ -173,6 +173,11 @@ internal static class HookLibrary
     internal static bool IsAvailable =>
         Environment.Is64BitProcess && Assembly.GetExecutingAssembly().GetManifestResourceInfo(ResourceName) is not null;
 
+    // One lock for the whole process: every hook session extracts the same embedded DLL at startup, and with a new hash
+    // those writes race. The loser's File.WriteAllBytes throws a sharing violation, and that session then silently gets
+    // no hook at all (seen with Excel and PowerPoint, while Word happened to win).
+    private static readonly object ExtractLock = new();
+
     /// <summary>
     /// Writes the DLL under %LOCALAPPDATA%\GlassForge\hook named by its hash. Explorer can keep an old copy loaded
     /// (XAML diagnostics holds it until Explorer restarts), so each version gets its own file instead of overwriting.
@@ -188,16 +193,22 @@ internal static class HookLibrary
         var hash = Convert.ToHexString(SHA256.HashData(bytes))[..12];
         var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "GlassForge", "hook");
         var path = Path.Combine(directory, $"GlassForge.Hook.{hash}.dll");
-        try
+        lock (ExtractLock)
         {
-            if (!File.Exists(path))
+            try
             {
-                Directory.CreateDirectory(directory);
-                File.WriteAllBytes(path, bytes);
+                if (!File.Exists(path))
+                {
+                    Directory.CreateDirectory(directory);
+                    // Write a private temp file and move it into place, so a reader never sees a partial DLL.
+                    var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+                    File.WriteAllBytes(temporary, bytes);
+                    File.Move(temporary, path, true);
+                }
+                return path;
             }
-            return path;
+            catch (IOException) { return null; }
+            catch (UnauthorizedAccessException) { return null; }
         }
-        catch (IOException) { return null; }
-        catch (UnauthorizedAccessException) { return null; }
     }
 }

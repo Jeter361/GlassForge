@@ -1,13 +1,13 @@
-// Microsoft Office (Word): Office draws its own Mica instead of asking DWM for one. Its UI library
+// Microsoft Office (Word, Excel, PowerPoint): Office draws its own Mica instead of asking DWM for one. Its UI library
 // (mso40uiwin32client.dll) builds effect graphs (a wallpaper brush blended with tint and luminosity floods) on
 // Compositor::TryCreateBlurredWallpaperBackdropBrush, a blur of the static wallpaper image, so animated wallpapers never
 // show. That method is detoured: every request makes both Office's brush and a host backdrop brush (the live blur of
 // whatever is behind the window, the same source DWM's Acrylic uses), and hands out the one for the current state.
 // Office's effect inputs are meant to be recorded through ICompositionEffectBrush::SetSourceParameter, so turning the
-// glass off (or on again) could plug the other brush into every input without restarting Word. UNVERIFIED: in the
-// first live test no input was recorded ("0 of 0 inputs switched"), so for now Word needs a restart either way.
+// glass off (or on again) could plug the other brush into every input without restarting Office. UNVERIFIED: in the
+// first live test no input was recorded ("0 of 0 inputs switched"), so for now Office needs a restart either way.
 //
-// Office makes its first brushes (the title bar and tab row among them) while Word starts, before the hooked UI thread
+// Office makes its first brushes (the title bar and tab row among them) while the app starts, before the hooked UI thread
 // runs any hook code, so DllMain starts the detour on a thread of its own (StartOfficeHooksEarly).
 #include <windows.h>
 #include <commctrl.h>
@@ -216,7 +216,7 @@ void ApplyInputs(bool on) {
             switched += SUCCEEDED(apply());
             continue;
         }
-        // Shared with the queued call, which may still run after a timed-out wait (never hang Word's UI thread on it).
+        // Shared with the queued call, which may still run after a timed-out wait (never hang the app's UI thread on it).
         struct Pending { HANDLE done = CreateEventW(nullptr, TRUE, FALSE, nullptr); HRESULT result = E_FAIL; ~Pending() { CloseHandle(done); } };
         auto pending = std::make_shared<Pending>();
         boolean queued = false;
@@ -232,6 +232,11 @@ void ApplyInputs(bool on) {
 
 // DWM stops drawing host backdrop brushes in an inactive window, and Office flattens its Mica when deactivated: both
 // would turn the glass black on focus out. The window keeps believing it is active (as for Explorer).
+//
+// KNOWN ISSUE (parked): because the window believes it is active while another window is really foreground, the first
+// click on an Office window can be spent on activation, so the title bar may take a second click before it drags. This
+// is the price of keeping the glass when unfocused; without the subclass the glass goes flat/black instead. Revisit if
+// both can be had at once (e.g. answering WM_MOUSEACTIVATE, or holding the active state only while visually unfocused).
 LRESULT CALLBACK KeepActive(HWND window, UINT message, WPARAM wParam, LPARAM lParam, UINT_PTR, DWORD_PTR) {
     if (message == WM_NCACTIVATE) return DefSubclassProc(window, message, TRUE, lParam);
     if (message == WM_ACTIVATEAPP && !wParam) return 0;
@@ -261,7 +266,7 @@ void InstallOfficeHooks() {
             }
         if (Real_BlurredWallpaper)
         {
-            // Once Office holds our brushes and the patched vtables, the DLL must stay until Word exits.
+            // Once Office holds our brushes and the patched vtables, the DLL must stay until the app exits.
             HMODULE self = nullptr;
             GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN, reinterpret_cast<LPCWSTR>(&Hook_BlurredWallpaper), &self);
             DetourTransactionBegin();
@@ -278,7 +283,7 @@ void InstallOfficeHooks() {
     if (!wasOn) ApplyInputs(true);
 }
 
-// Called from DllMain: the DLL lands in Word well before the hooked UI thread runs any hook code, and Office makes its
+// Called from DllMain: the DLL lands in the Office process well before the hooked UI thread runs any hook code, and Office makes its
 // wallpaper brushes in that gap. A thread of our own installs the detour at once (it starts after the loader lock).
 void StartOfficeHooksEarly() {
     if (HANDLE thread = CreateThread(nullptr, 0, [](void*) -> DWORD { InstallOfficeHooks(); return 0; }, nullptr, 0, nullptr))
@@ -314,7 +319,9 @@ void RemoveOfficeHooks() {
 void OptInOfficeWindow(HWND window) {
     wchar_t name[32]{};
     GetClassNameW(window, name, _countof(name));
-    if (_wcsicmp(name, L"OpusApp") != 0) return;
+    // Word, Excel and PowerPoint main windows (office.cpp is shared by all three).
+    const bool mainWindow = _wcsicmp(name, L"OpusApp") == 0 || _wcsicmp(name, L"XLMAIN") == 0 || _wcsicmp(name, L"PPTFrameClass") == 0;
+    if (!mainWindow) return;
     AcquireSRWLockExclusive(&g_lock);
     const bool added = g_windows.insert(window).second;
     ReleaseSRWLockExclusive(&g_lock);

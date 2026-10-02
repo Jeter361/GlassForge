@@ -59,7 +59,7 @@ namespace
     // so it can't be subclassed from here; a thread timer drives the XAML refresh instead.
     thread_local bool t_xamlOnly = false;
     thread_local UINT_PTR t_threadTimer = 0;
-    // Word: the last top-level window this thread opted in (office.cpp), so each is handled once.
+    // Office: the last top-level window this thread opted in (office.cpp), so each is handled once.
     thread_local HWND t_officeRoot = nullptr;
 
     bool OwnsWindow(HWND window)
@@ -719,6 +719,13 @@ namespace
         return _wcsicmp(name ? name + 1 : path, exe) == 0;
     }
 
+    // Word, Excel and PowerPoint share Office's UI stack (mso40uiwin32client.dll builds the same Mica brush graph),
+    // so the same early detour and brush swap covers all three (office.cpp).
+    bool IsOfficeProcess()
+    {
+        return IsProcessNamed(L"WINWORD.EXE") || IsProcessNamed(L"EXCEL.EXE") || IsProcessNamed(L"POWERPNT.EXE");
+    }
+
     bool SurveyRequested()
     {
         wchar_t path[MAX_PATH]{};
@@ -823,9 +830,9 @@ extern "C" __declspec(dllexport) LRESULT CALLBACK GlassForgeGetMessageProc(int c
             const HWND root = GetAncestor(message->hwnd, GA_ROOT);
             wchar_t name[64]{};
             GetClassNameW(root, name, _countof(name));
-            // Word: Office's wallpaper brushes become live glass (office.cpp). Any window counts, so a hook placed on the
-            // splash screen catches the brushes Office makes at startup.
-            if (root != t_officeRoot && IsProcessNamed(L"WINWORD.EXE"))
+            // Office (Word, Excel, PowerPoint): Office's wallpaper brushes become live glass (office.cpp). Any window
+            // counts, so a hook placed on the splash screen catches the brushes Office makes at startup.
+            if (root != t_officeRoot && IsOfficeProcess())
             {
                 t_officeRoot = root;
                 InstallOfficeHooks();
@@ -854,7 +861,7 @@ extern "C" __declspec(dllexport) LRESULT CALLBACK GlassForgeGetMessageProc(int c
             t_detached = true;
             ReleaseOfficeWindows();
             t_officeRoot = nullptr;
-            if (IsProcessNamed(L"WINWORD.EXE")) DisableOfficeGlass();
+            if (IsOfficeProcess()) DisableOfficeGlass();
             if (!RemoveGlass()) Uninstall();
         }
     }
@@ -869,7 +876,7 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID)
         g_module = module;
         DisableThreadLibraryCalls(module);
         Log(L"loaded");
-        if (IsProcessNamed(L"WINWORD.EXE")) StartOfficeHooksEarly();
+        if (IsOfficeProcess()) StartOfficeHooksEarly();
         break;
     case DLL_PROCESS_DETACH:
         // Never leave detours (or a redirected UWP method) pointing into an unloaded DLL; GlassForge normally sends

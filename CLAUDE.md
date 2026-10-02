@@ -21,7 +21,8 @@ Classify each app (Win32/GDI, WinUI 3, system XAML/UWP, elevated or not) and mea
 
 - **Task Manager: parked.** It runs elevated (High integrity), so a normal-user GlassForge is blocked from every route (UIPI). An elevated probe got glass on the Processes page; Details stays grey. See `docs/GLASS_WRITEUP.md`, "Update 3: Task Manager", and `native/tools/taskmgr-probe.ps1` (run elevated).
 - **Microsoft Word: working** (opt-in hook, `native/hook/office.cpp`). Office's own Mica brush is swapped for a live host backdrop brush; the detour must be in place at Word's startup (`DllMain` thread). Turning it off needs a Word restart. See "Update 4: Microsoft Word".
-- **Next: Excel and PowerPoint** (Excel measured: `XLMAIN`, same Office UI library as Word). Handoff prompt with the job: `docs/NEXT_AGENT_PROMPT.md`; findings in "Update 5". After Office: Calculator, Paint, Snipping Tool, Clock, Photos, Media Player.
+- **Excel and PowerPoint: working** (opt-in hook, same `office.cpp` swap as Word; `IsOfficeProcess`/`IsOffice` cover all three). See "Update 5", which also records the hook-DLL extraction race that made the first generalised launch look broken (fixed in `ExplorerHookSession.Extract`). Note: the keep-active subclass means the first click on an Office window can be spent on activation (parked, see `office.cpp` `KeepActive`).
+- **Next:** Calculator, Paint, Snipping Tool, Clock, Photos, Media Player. Handoff prompt: `docs/NEXT_AGENT_PROMPT.md`.
 
 ## Working on this repo
 

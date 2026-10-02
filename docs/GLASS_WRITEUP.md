@@ -531,17 +531,55 @@ Disassembly note (`dcomp.dll`): the public brush methods share one constructor (
 
 ---
 
-# Update 5: Excel and PowerPoint (started, Oct 1, 2026, night)
+# Update 5: Excel and PowerPoint (Oct 1, 2026, night)
 
-**State:** measured only; no code yet. The handoff prompt for the next session is `docs/NEXT_AGENT_PROMPT.md`.
+**State:** working and confirmed by eye (Excel and PowerPoint both). The Office hook now covers Word, Excel and
+PowerPoint: the same `office.cpp` brush swap, driven by an Office process list instead of Word only. Excel and
+PowerPoint need closing and reopening after the toggle changes, as Word does.
+
+## What they are
 
 | | Excel | PowerPoint |
 | --- | --- | --- |
 | Exe | `Office16\EXCEL.EXE` | `Office16\POWERPNT.EXE` |
-| Integrity | Medium | not measured |
-| Main window class | `XLMAIN` | not measured (probably `PPTFrameClass`) |
-| DWM backdrop | 0 | not measured |
-| Office UI library | `mso40uiwin32client.dll`, `dcomp.dll`, `wuceffects.dll` loaded, same as Word | not measured |
+| Integrity | Medium | Medium |
+| Main window class | `XLMAIN` (Excel opens two: a start screen and the workbook) | `PPTFrameClass` |
+| DWM backdrop | 0 | **3 (Acrylic)** — PowerPoint asks DWM for Acrylic, unlike Word and Excel |
+| Office UI library | `mso40uiwin32client.dll`, `dcomp.dll`, `wuceffects.dll` loaded | same |
+| `TryCreateBlurredWallpaperBackdropBrush` | called; returns our host backdrop brush | same |
 
-The first PowerPoint launch showed no process (cause unknown). Plan: generalise Word's `WINWORD.EXE`/`OpusApp` checks
-(hook DLL) and `IsWord` (app) to an Office list, then test each app from a fresh launch through GlassForge.
+The handoff's "first PowerPoint launch showed no process" was a fluke; it starts normally and matches Word's stack.
+PowerPoint's DWM backdrop being 3 is the one measurement that differs from Word; whether any DWM Acrylic shows through
+without the hook was not tried, but the hook works regardless.
+
+## Approach (Word's fix, generalised)
+
+- Hook DLL (`dllmain.cpp`): one `IsOfficeProcess()` (WINWORD/EXCEL/POWERPNT) replaces the three `WINWORD.EXE` checks, so
+  `StartOfficeHooksEarly`, the message-hook opt-in and the Detach path apply to all three.
+- `office.cpp` `OptInOfficeWindow`: accepts `OpusApp`, `XLMAIN` and `PPTFrameClass` (everything else is process-wide and
+  shared).
+- App: `AppProfile.IsOffice` replaces `IsWord`; `HookWindowClass` is `"*"` for all three; `GlassHostManager` runs the
+  hook-only session; the toggle's heading and warning name the actual app (`OfficeDisplayName`/`OfficeExeName`); Excel
+  and PowerPoint are in the default profile list; a smoke test per app.
+- Timing is the same as Word: for both apps `brush detours installed` precedes the first `wallpaper brush request` in
+  `hook.log`, so the title bar and tabs come up live from a fresh launch.
+
+## Bug found and fixed: the hook-DLL extraction race
+
+After rebuilding the hook, the first GlassForge launch hooked Word but not Excel or PowerPoint, with **no** hook lines
+in `hook.log` for them at all. Cause: every hook session calls `HookLibrary.Extract()` on its own thread at startup, and
+with a new DLL hash the file does not exist yet, so several threads call `File.WriteAllBytes` at once. The losers get a
+sharing violation (`IOException`), `Extract` returns null, and that session silently runs with no hook (the worker just
+idles in its message loop). Word happened to win the race; Excel and PowerPoint lost. This is why "just generalise it"
+appeared not to work at first.
+
+Fixed in `src/GlassForge.App/Services/ExplorerHookSession.cs`: a process-wide lock around the extraction plus a
+temp-file-and-move write, so one thread writes and the rest reuse the file. Verified by deleting the extracted DLL and
+restarting: Excel and PowerPoint both hook on the first launch.
+
+## Not working / untested
+
+- Turning the glass off still needs a restart (same as Word; the live input switch recorded 0 of 0).
+- The keep-active subclass has a known side effect: the first click on an Office window can be spent on activation, so
+  the title bar may need a second click before it drags. **Parked**; noted at `office.cpp` `KeepActive`.
+- Untested: Office light theme, multiple windows, Excel/PowerPoint crash recovery and long sessions.

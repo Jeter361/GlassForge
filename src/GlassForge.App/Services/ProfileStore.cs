@@ -24,7 +24,9 @@ public sealed class ProfileStore
         [
             New("Microsoft Teams", "ms-teams"),
             New("Microsoft Outlook", "olk"),
-            New("Microsoft Word", "WINWORD")
+            New("Microsoft Word", "WINWORD"),
+            New("Microsoft Excel", "EXCEL"),
+            New("Microsoft PowerPoint", "POWERPNT")
         ];
     }
 

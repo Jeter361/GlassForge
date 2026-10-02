@@ -59,6 +59,8 @@ public sealed class AppProfile : INotifyPropertyChanged
     /// content covers, so it only shows once extended into the whole window.
     /// </summary>
     private static readonly HashSet<string> OwnTitleBarApps = new(StringComparer.OrdinalIgnoreCase) { "notepad" };
+    /// <summary>Office apps whose own Mica brush the hook swaps for live glass (WINWORD, EXCEL, POWERPNT).</summary>
+    private static readonly HashSet<string> OfficeApps = new(StringComparer.OrdinalIgnoreCase) { "WINWORD", "EXCEL", "POWERPNT" };
     [JsonIgnore] public bool IsNotepad => string.Equals(ProcessName, "notepad", StringComparison.OrdinalIgnoreCase);
     [JsonIgnore] public bool DrawsOwnTitleBar => OwnTitleBarApps.Contains(ProcessName);
     /// <summary>Last known full path of the app's exe, for its icon while the app isn't running.</summary>
@@ -81,9 +83,20 @@ public sealed class AppProfile : INotifyPropertyChanged
     [JsonIgnore] public bool IsExplorer => string.Equals(ProcessName, "explorer", StringComparison.OrdinalIgnoreCase);
     [JsonIgnore] public bool IsSettings => string.Equals(ProcessName, "SystemSettings", StringComparison.OrdinalIgnoreCase);
     [JsonIgnore] public bool IsTerminal => string.Equals(ProcessName, "WindowsTerminal", StringComparison.OrdinalIgnoreCase);
-    [JsonIgnore] public bool IsWord => string.Equals(ProcessName, "WINWORD", StringComparison.OrdinalIgnoreCase);
+    /// <summary>Word, Excel or PowerPoint: they all draw their own Mica, so the same hook swap applies (office.cpp).</summary>
+    [JsonIgnore] public bool IsOffice => OfficeApps.Contains(ProcessName);
+    /// <summary>The Office app's friendly name for the toggle's warning text.</summary>
+    [JsonIgnore] public string OfficeDisplayName => ProcessName.ToUpperInvariant() switch
+    {
+        "WINWORD" => "Word",
+        "EXCEL" => "Excel",
+        "POWERPNT" => "PowerPoint",
+        _ => "Office"
+    };
+    /// <summary>The Office app's executable name for the toggle's warning text.</summary>
+    [JsonIgnore] public string OfficeExeName => ProcessName.ToUpperInvariant() + ".EXE";
     /// <summary>The top-level window class the hook styles in this app, or null when the app has no hook mode.</summary>
-    [JsonIgnore] public string? HookWindowClass => IsExplorer ? "CabinetWClass" : IsTerminal ? "CASCADIA_HOSTING_WINDOW_CLASS" : IsSettings ? UwpContentWindowClass : IsWord ? AnyWindowClass : null;
+    [JsonIgnore] public string? HookWindowClass => IsExplorer ? "CabinetWClass" : IsTerminal ? "CASCADIA_HOSTING_WINDOW_CLASS" : IsSettings ? UwpContentWindowClass : IsOffice ? AnyWindowClass : null;
     /// <summary>A UWP app's UI thread owns this window, hosted inside ApplicationFrameHost's frame.</summary>
     public const string UwpContentWindowClass = "Windows.UI.Core.CoreWindow";
     /// <summary>Every top-level window of the app's process: Word makes its backdrop at startup, so the hook has to
@@ -141,7 +154,9 @@ public sealed class AppProfile : INotifyPropertyChanged
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsExplorer)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsTerminal)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsSettings)));
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsWord)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsOffice)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(OfficeDisplayName)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(OfficeExeName)));
         }
         if (property == nameof(DisplayName)) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Initial)));
         if (property == nameof(TintColor)) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(TintHex)));

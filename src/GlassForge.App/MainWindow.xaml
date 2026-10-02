@@ -322,12 +322,12 @@
                       </StackPanel>
                     </Border>
                   </StackPanel>
-                  <!-- Word only: the same hook, swapping Office's own Mica for live glass -->
+                  <!-- Office (Word, Excel, PowerPoint): the same hook, swapping Office's own Mica for live glass -->
                   <StackPanel Margin="0,16,0,0">
                     <StackPanel.Style>
                       <Style TargetType="StackPanel">
                         <Setter Property="Visibility" Value="Collapsed" />
-                        <Style.Triggers><DataTrigger Binding="{Binding IsWord}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
+                        <Style.Triggers><DataTrigger Binding="{Binding IsOffice}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
                       </Style>
                     </StackPanel.Style>
                     <Grid>
@@ -337,7 +337,9 @@
                           <TextBlock Text="Glass background" FontSize="13" />
                           <Border Background="#33F87171" CornerRadius="4" Padding="6,1" Margin="8,0,0,0" VerticalAlignment="Center"><TextBlock Text="EXPERIMENTAL" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource DangerBrush}" /></Border>
                         </StackPanel>
-                        <TextBlock Text="Word paints its own Mica (the static wallpaper) around the page. This swaps it for a live blur of what's behind the window, animated wallpapers included, and keeps it when Word isn't focused. Native backdrop does nothing for Word without this. Close and reopen Word after turning it on or off." FontSize="12" Foreground="{StaticResource SubtleBrush}" TextWrapping="Wrap" Margin="0,2,12,0" />
+                        <TextBlock FontSize="12" Foreground="{StaticResource SubtleBrush}" TextWrapping="Wrap" Margin="0,2,12,0">
+                          <Run Text="{Binding OfficeDisplayName, Mode=OneWay}" /><Run Text=" paints its own Mica (the static wallpaper) behind its window. This swaps it for a live blur of what's behind the window, animated wallpapers included, and keeps it when the app isn't focused. Native backdrop does nothing without this. Close and reopen " /><Run Text="{Binding OfficeDisplayName, Mode=OneWay}" /><Run Text=" after turning it on or off." />
+                        </TextBlock>
                       </StackPanel>
                       <CheckBox Grid.Column="1" IsChecked="{Binding HookGlass}" VerticalAlignment="Center" />
                     </Grid>
@@ -345,10 +347,13 @@
                       <StackPanel>
                         <StackPanel Orientation="Horizontal">
                           <TextBlock Style="{StaticResource Icon}" Text="&#xE7BA;" Foreground="{StaticResource DangerBrush}" Margin="0,0,8,0" VerticalAlignment="Center" />
-                          <TextBlock Text="Warning: this injects code into Word" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource DangerBrush}" VerticalAlignment="Center" />
+                          <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource DangerBrush}" VerticalAlignment="Center">
+                            <Run Text="Warning: this injects code into " /><Run Text="{Binding OfficeDisplayName, Mode=OneWay}" />
+                          </TextBlock>
                         </StackPanel>
-                        <TextBlock FontSize="12" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,0"
-                                   Text="This loads a GlassForge DLL into WINWORD.EXE and changes how Office creates its background. All Word windows share one process: if it ever crashes, every open document closes with it, and unsaved work can be lost. Antivirus may flag it, and Office updates can break it. After turning it off, close and reopen Word to get its own background back; an inactive copy of the DLL stays loaded until then." />
+                        <TextBlock FontSize="12" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,0">
+                          <Run Text="This loads a GlassForge DLL into " /><Run Text="{Binding OfficeExeName, Mode=OneWay}" /><Run Text=" and changes how Office creates its background. All " /><Run Text="{Binding OfficeDisplayName, Mode=OneWay}" /><Run Text=" windows share one process: if it ever crashes, every open document closes with it, and unsaved work can be lost. Antivirus may flag it, and Office updates can break it. After turning it off, close and reopen " /><Run Text="{Binding OfficeDisplayName, Mode=OneWay}" /><Run Text=" to get its own background back; an inactive copy of the DLL stays loaded until then." />
+                        </TextBlock>
                       </StackPanel>
                     </Border>
                   </StackPanel>
