@@ -44,8 +44,8 @@ in **`C:\glass\GlassForge`**, with local commits only.
 | Windows Settings | Working, the flagship: opt-in hook swaps its Mica brush for a live host backdrop brush | `832a571` | "Update 2: Windows Settings: working" |
 | Task Manager | **Parked.** Runs elevated (High integrity), so Windows (UIPI) blocks every route from a normal-user GlassForge | `34b216a` | "Update 3" |
 | Microsoft Word | **Working, confirmed by me by eye.** Opt-in hook, "Glass background (EXPERIMENTAL)" | `58a264e` | "Update 4" |
-| Excel | **Working.** Confirmed by eye. Opt-in hook, same Office swap as Word | (this session) | "Update 5" |
-| PowerPoint | **Working.** Confirmed by eye. Opt-in hook, same Office swap as Word | (this session) | "Update 5" |
+| Excel | **Working.** Confirmed by eye. Opt-in hook, same Office swap as Word | `a87b745` | "Update 5" |
+| PowerPoint | **Working.** Confirmed by eye. Opt-in hook, same Office swap as Word | `a87b745` | "Update 5" |
 | Later | Calculator, Paint, Snipping Tool, Clock, Photos, Media Player | | |
 
 ### How Word was solved (Excel and PowerPoint very likely work the same way)

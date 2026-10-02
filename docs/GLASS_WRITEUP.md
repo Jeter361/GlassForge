@@ -535,7 +535,7 @@ Disassembly note (`dcomp.dll`): the public brush methods share one constructor (
 
 **State:** working and confirmed by eye (Excel and PowerPoint both). The Office hook now covers Word, Excel and
 PowerPoint: the same `office.cpp` brush swap, driven by an Office process list instead of Word only. Excel and
-PowerPoint need closing and reopening after the toggle changes, as Word does.
+PowerPoint need closing and reopening after the toggle changes, as Word does. Commit: `a87b745` (local only).
 
 ## What they are
 
