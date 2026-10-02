@@ -720,10 +720,13 @@ namespace
     }
 
     // Word, Excel and PowerPoint share Office's UI stack (mso40uiwin32client.dll builds the same Mica brush graph),
-    // so the same early detour and brush swap covers all three (office.cpp).
+    // so the same early detour and brush swap covers all three (office.cpp). Teams is routed here too: it also uses
+    // Windows.UI.Composition, and the host-backdrop opt-in makes its native chrome live glass (its WebView2 chat pane
+    // stays opaque and is parked).
     bool IsOfficeProcess()
     {
-        return IsProcessNamed(L"WINWORD.EXE") || IsProcessNamed(L"EXCEL.EXE") || IsProcessNamed(L"POWERPNT.EXE");
+        return IsProcessNamed(L"WINWORD.EXE") || IsProcessNamed(L"EXCEL.EXE") || IsProcessNamed(L"POWERPNT.EXE")
+            || IsProcessNamed(L"ms-teams.exe");
     }
 
     bool SurveyRequested()

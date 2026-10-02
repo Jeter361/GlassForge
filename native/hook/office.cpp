@@ -319,8 +319,10 @@ void RemoveOfficeHooks() {
 void OptInOfficeWindow(HWND window) {
     wchar_t name[32]{};
     GetClassNameW(window, name, _countof(name));
-    // Word, Excel and PowerPoint main windows (office.cpp is shared by all three).
-    const bool mainWindow = _wcsicmp(name, L"OpusApp") == 0 || _wcsicmp(name, L"XLMAIN") == 0 || _wcsicmp(name, L"PPTFrameClass") == 0;
+    // Word, Excel and PowerPoint main windows, plus Teams' TeamsWebView (its chrome uses host backdrop brushes; the
+    // WebView2 chat pane stays opaque). All office.cpp does for Teams is this opt-in and keep-active.
+    const bool mainWindow = _wcsicmp(name, L"OpusApp") == 0 || _wcsicmp(name, L"XLMAIN") == 0 || _wcsicmp(name, L"PPTFrameClass") == 0
+        || _wcsicmp(name, L"TeamsWebView") == 0;
     if (!mainWindow) return;
     AcquireSRWLockExclusive(&g_lock);
     const bool added = g_windows.insert(window).second;

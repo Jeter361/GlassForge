@@ -49,6 +49,7 @@ Check(new AppProfile { ProcessName = "WINWORD" }.HookWindowClass == AppProfile.A
 Check(new AppProfile { ProcessName = "EXCEL" }.IsOffice && new AppProfile { ProcessName = "EXCEL" }.HookWindowClass == AppProfile.AnyWindowClass, "Excel uses the Office hook on every window of its process.");
 Check(new AppProfile { ProcessName = "POWERPNT" }.IsOffice && new AppProfile { ProcessName = "POWERPNT" }.HookWindowClass == AppProfile.AnyWindowClass, "PowerPoint uses the Office hook on every window of its process.");
 Check(new AppProfile { ProcessName = "POWERPNT" }.OfficeDisplayName == "PowerPoint" && new AppProfile { ProcessName = "EXCEL" }.OfficeExeName == "EXCEL.EXE", "The Office warning text names the right app.");
+Check(new AppProfile { ProcessName = "ms-teams" }.IsOffice && new AppProfile { ProcessName = "ms-teams" }.HookWindowClass == AppProfile.AnyWindowClass && new AppProfile { ProcessName = "ms-teams" }.OfficeDisplayName == "Teams", "Teams uses the hook on every window of its process.");
 Check(!new AppProfile { ProcessName = "olk" }.IsOffice, "Non-Office apps are not treated as Office.");
 
 bool MediaMatch(string id, string process) => MediaPlaybackMonitor.Matches(id, MediaPlaybackMonitor.Normalize(process));

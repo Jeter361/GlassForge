@@ -59,8 +59,10 @@ public sealed class AppProfile : INotifyPropertyChanged
     /// content covers, so it only shows once extended into the whole window.
     /// </summary>
     private static readonly HashSet<string> OwnTitleBarApps = new(StringComparer.OrdinalIgnoreCase) { "notepad" };
-    /// <summary>Office apps whose own Mica brush the hook swaps for live glass (WINWORD, EXCEL, POWERPNT).</summary>
-    private static readonly HashSet<string> OfficeApps = new(StringComparer.OrdinalIgnoreCase) { "WINWORD", "EXCEL", "POWERPNT" };
+    /// <summary>Apps the opt-in hook makes glass (WINWORD, EXCEL, POWERPNT, ms-teams). Office apps get their own
+    /// Mica brush swapped; Teams gets its native chrome shown live via the host-backdrop opt-in (its WebView2 chat
+    /// pane stays opaque).</summary>
+    private static readonly HashSet<string> OfficeApps = new(StringComparer.OrdinalIgnoreCase) { "WINWORD", "EXCEL", "POWERPNT", "ms-teams" };
     [JsonIgnore] public bool IsNotepad => string.Equals(ProcessName, "notepad", StringComparison.OrdinalIgnoreCase);
     [JsonIgnore] public bool DrawsOwnTitleBar => OwnTitleBarApps.Contains(ProcessName);
     /// <summary>Last known full path of the app's exe, for its icon while the app isn't running.</summary>
@@ -91,6 +93,7 @@ public sealed class AppProfile : INotifyPropertyChanged
         "WINWORD" => "Word",
         "EXCEL" => "Excel",
         "POWERPNT" => "PowerPoint",
+        "MS-TEAMS" => "Teams",
         _ => "Office"
     };
     /// <summary>The Office app's executable name for the toggle's warning text.</summary>

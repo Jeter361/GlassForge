@@ -352,10 +352,13 @@
                           </TextBlock>
                         </StackPanel>
                         <TextBlock FontSize="12" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,0">
-                          <Run Text="This loads a GlassForge DLL into " /><Run Text="{Binding OfficeExeName, Mode=OneWay}" /><Run Text=" and changes how Office creates its background. All " /><Run Text="{Binding OfficeDisplayName, Mode=OneWay}" /><Run Text=" windows share one process: if it ever crashes, every open document closes with it, and unsaved work can be lost. Antivirus may flag it, and Office updates can break it. After turning it off, close and reopen " /><Run Text="{Binding OfficeDisplayName, Mode=OneWay}" /><Run Text=" to get its own background back; an inactive copy of the DLL stays loaded until then." />
+                          <Run Text="This loads a GlassForge DLL into " /><Run Text="{Binding OfficeExeName, Mode=OneWay}" /><Run Text=" and changes how it draws its background. All " /><Run Text="{Binding OfficeDisplayName, Mode=OneWay}" /><Run Text=" windows share one process: if it ever crashes, every open document closes with it, and unsaved work can be lost. Antivirus may flag it, and updates can break it. After turning it off, close and reopen " /><Run Text="{Binding OfficeDisplayName, Mode=OneWay}" /><Run Text=" to get its own background back; an inactive copy of the DLL stays loaded until then." />
                         </TextBlock>
                       </StackPanel>
                     </Border>
+                    <TextBlock FontSize="12" Foreground="{StaticResource SubtleBrush}" TextWrapping="Wrap" Margin="0,10,0,0">
+                      <Run Text="Known issue: because the glass is kept while the window is unfocused, the first click on a " /><Run Text="{Binding OfficeDisplayName, Mode=OneWay}" /><Run Text=" window can be spent re-activating it, so the title bar may take two clicks to drag." />
+                    </TextBlock>
                   </StackPanel>
                   <!-- Windows Terminal only: the same hook, frame only -->
                   <StackPanel Margin="0,16,0,0">

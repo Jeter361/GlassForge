@@ -583,3 +583,58 @@ restarting: Excel and PowerPoint both hook on the first launch.
 - The keep-active subclass has a known side effect: the first click on an Office window can be spent on activation, so
   the title bar may need a second click before it drags. **Parked**; noted at `office.cpp` `KeepActive`.
 - Untested: Office light theme, multiple windows, Excel/PowerPoint crash recovery and long sessions.
+
+---
+
+# Update 6: Microsoft Teams (Oct 1, 2026, late)
+
+**State:** the native chrome (borders, rails, sidebar) works as an opt-in hook and is confirmed by eye. The main chat
+pane stays opaque and is **parked** (see below).
+
+## What Teams is
+
+| | |
+| --- | --- |
+| Exe | `...\WindowsApps\MSTeams_26225.1806.5074.1452_x64__8wekyb3d8bbwe\ms-teams.exe` (MSIX) |
+| Integrity | Medium |
+| Main window | `TeamsWebView` (Win32 host) |
+| Framework | WebView2/Chromium + Microsoft's "TwinUI" (`twinui.dll`, `twinui.appcore.dll`); the page is in child `Chrome_WidgetWin_*` HWNDs, in a separate renderer process |
+| Backdrop | `DWMWA_SYSTEMBACKDROP_TYPE` 0, immersive dark mode 1; `dcomp.dll` and `wuceffects.dll` loaded |
+
+## What works: the native chrome
+
+Teams' own TwinUI creates **host backdrop brushes** for its chrome. Those only render once `DWMWA_USE_HOSTBACKDROPBRUSH`
+is set on the window, and that attribute **cannot be set from outside** — from another process Windows returns
+`E_INVALIDARG` (0x80070057), while `DWMWA_SYSTEMBACKDROP_TYPE` from outside returns `S_OK`. So, as with Office, the
+opt-in hook has to set it in-process. The keep-active subclass keeps it glass when unfocused.
+
+No new concept was needed: Teams was added to the Office list (`IsOfficeProcess`, `IsOffice`), `office.cpp`
+`OptInOfficeWindow` accepts `TeamsWebView`, and the profile UI names the app ("Teams"). The Office brush swap is
+harmless here — Teams did make one `wallpaper brush request … from ms-teams.exe` — but the visible glass comes from
+Teams' own host backdrop brushes, not from our swap.
+
+## Why the chat pane is parked
+
+The WebView2 chat area is opaque because the page paints solid backgrounds. We *could* clear them live through
+DevTools (large elements only, leaving message bubbles), and then live wallpaper showed through — but:
+
+- Windows 11's DWM system backdrops (Mica **and** Acrylic) both sample the **static** wallpaper; only host backdrop
+  brushes are live. With the page cleared, the chat revealed the window's system backdrop, i.e. the static wallpaper.
+  Proved by changing the Windows wallpaper: the pane changed brown → blue with it. The live wall showed only because
+  Teams' own host backdrop brushes sat behind.
+- Baking the page transparency needs a script injected at document creation
+  (`ICoreWebView2::AddScriptToExecuteOnDocumentCreated`, plus `put_DefaultBackgroundColor` = transparent), which means
+  intercepting Teams' WebView2 creation.
+- We built that interception (detour `CreateCoreWebView2EnvironmentWithOptions`/`CreateCoreWebView2Environment` in
+  `WebView2Loader.dll`, wrap the environment- and controller-completed handlers), but **Teams creates its WebView2
+  environment before it creates any window**, so a window-triggered hook is always too late and the detour never fired.
+  Even hooking at `EVENT_OBJECT_CREATE` instead of `EVENT_OBJECT_SHOW` did not help. Making it stick needs
+  process-start injection (a new GlassForge mechanism) and would be fragile against Teams updates. The code was
+  removed.
+
+## Not working / untested
+
+- The chat pane (above).
+- The keep-active subclass means the first click on a Teams window can be spent on activation (same parked issue as
+  Office; see `office.cpp` `KeepActive`).
+- Untested: light mode, multiple Teams windows and popouts, minimize/restore, and Teams updates.
