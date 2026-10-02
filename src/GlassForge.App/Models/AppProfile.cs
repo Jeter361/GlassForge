@@ -81,10 +81,14 @@ public sealed class AppProfile : INotifyPropertyChanged
     [JsonIgnore] public bool IsExplorer => string.Equals(ProcessName, "explorer", StringComparison.OrdinalIgnoreCase);
     [JsonIgnore] public bool IsSettings => string.Equals(ProcessName, "SystemSettings", StringComparison.OrdinalIgnoreCase);
     [JsonIgnore] public bool IsTerminal => string.Equals(ProcessName, "WindowsTerminal", StringComparison.OrdinalIgnoreCase);
+    [JsonIgnore] public bool IsWord => string.Equals(ProcessName, "WINWORD", StringComparison.OrdinalIgnoreCase);
     /// <summary>The top-level window class the hook styles in this app, or null when the app has no hook mode.</summary>
-    [JsonIgnore] public string? HookWindowClass => IsExplorer ? "CabinetWClass" : IsTerminal ? "CASCADIA_HOSTING_WINDOW_CLASS" : IsSettings ? UwpContentWindowClass : null;
+    [JsonIgnore] public string? HookWindowClass => IsExplorer ? "CabinetWClass" : IsTerminal ? "CASCADIA_HOSTING_WINDOW_CLASS" : IsSettings ? UwpContentWindowClass : IsWord ? AnyWindowClass : null;
     /// <summary>A UWP app's UI thread owns this window, hosted inside ApplicationFrameHost's frame.</summary>
     public const string UwpContentWindowClass = "Windows.UI.Core.CoreWindow";
+    /// <summary>Every top-level window of the app's process: Word makes its backdrop at startup, so the hook has to
+    /// reach it through the splash screen, before the main window exists.</summary>
+    public const string AnyWindowClass = "*";
     public bool Enabled { get => _enabled; set => Set(ref _enabled, value); }
     public byte WindowOpacity { get => _windowOpacity; set => Set(ref _windowOpacity, value); }
     public byte TintOpacity { get => _tintOpacity; set => Set(ref _tintOpacity, value); }
@@ -137,6 +141,7 @@ public sealed class AppProfile : INotifyPropertyChanged
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsExplorer)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsTerminal)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsSettings)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsWord)));
         }
         if (property == nameof(DisplayName)) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Initial)));
         if (property == nameof(TintColor)) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(TintHex)));

@@ -45,6 +45,7 @@ Check(terminal.HookWindowClass == "CASCADIA_HOSTING_WINDOW_CLASS" && new AppProf
 Check(System.Text.Json.JsonSerializer.Serialize(terminal).Contains("\"ExplorerGlass\":true"), "The hook option keeps its saved name, so existing Explorer profiles still load it.");
 
 Check(new AppProfile { ProcessName = "SystemSettings" }.HookWindowClass == AppProfile.UwpContentWindowClass, "Settings hooks its UWP content window.");
+Check(new AppProfile { ProcessName = "WINWORD" }.HookWindowClass == AppProfile.AnyWindowClass, "Word hooks every window of its process (the splash screen included).");
 
 bool MediaMatch(string id, string process) => MediaPlaybackMonitor.Matches(id, MediaPlaybackMonitor.Normalize(process));
 Check(MediaMatch("Chrome", "chrome"), "Chrome media sessions match chrome.exe.");

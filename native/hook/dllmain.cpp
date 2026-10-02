@@ -21,6 +21,7 @@
 #include "log.h"
 #include "xaml.h"
 #include "uwp.h"
+#include "office.h"
 
 namespace
 {
@@ -58,6 +59,8 @@ namespace
     // so it can't be subclassed from here; a thread timer drives the XAML refresh instead.
     thread_local bool t_xamlOnly = false;
     thread_local UINT_PTR t_threadTimer = 0;
+    // Word: the last top-level window this thread opted in (office.cpp), so each is handled once.
+    thread_local HWND t_officeRoot = nullptr;
 
     bool OwnsWindow(HWND window)
     {
@@ -820,6 +823,14 @@ extern "C" __declspec(dllexport) LRESULT CALLBACK GlassForgeGetMessageProc(int c
             const HWND root = GetAncestor(message->hwnd, GA_ROOT);
             wchar_t name[64]{};
             GetClassNameW(root, name, _countof(name));
+            // Word: Office's wallpaper brushes become live glass (office.cpp). Any window counts, so a hook placed on the
+            // splash screen catches the brushes Office makes at startup.
+            if (root != t_officeRoot && IsProcessNamed(L"WINWORD.EXE"))
+            {
+                t_officeRoot = root;
+                InstallOfficeHooks();
+                OptInOfficeWindow(root);
+            }
             // File Explorer folder windows get the full treatment; Windows Terminal only the frame (see t_frameOnly).
             const bool terminal = _wcsicmp(name, L"CASCADIA_HOSTING_WINDOW_CLASS") == 0;
             // UWP Settings: the hook runs on its CoreWindow thread; the root is ApplicationFrameHost's frame.
@@ -841,6 +852,9 @@ extern "C" __declspec(dllexport) LRESULT CALLBACK GlassForgeGetMessageProc(int c
         else if (message->message == g_detachMessage)
         {
             t_detached = true;
+            ReleaseOfficeWindows();
+            t_officeRoot = nullptr;
+            if (IsProcessNamed(L"WINWORD.EXE")) DisableOfficeGlass();
             if (!RemoveGlass()) Uninstall();
         }
     }
@@ -855,11 +869,13 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID)
         g_module = module;
         DisableThreadLibraryCalls(module);
         Log(L"loaded");
+        if (IsProcessNamed(L"WINWORD.EXE")) StartOfficeHooksEarly();
         break;
     case DLL_PROCESS_DETACH:
         // Never leave detours (or a redirected UWP method) pointing into an unloaded DLL; GlassForge normally sends
         // Detach first.
         UndoUwpRedirect();
+        RemoveOfficeHooks();
         Uninstall();
         Log(L"unloaded");
         break;

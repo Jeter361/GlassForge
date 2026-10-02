@@ -29,6 +29,10 @@ public sealed class GlassHostManager : IDisposable
         {
             // Stops in reverse: the hook gives each window its own frame back before the native session restores
             // what it set.
+            // Word only gets the hook: Office skips its own Mica (and so the brush the hook swaps) when the window already
+            // has a DWM backdrop, which the native session would set.
+            GlassMode.Native when profile.IsWord && profile.HookGlass && HookLibrary.IsAvailable =>
+                new ExplorerHookSession(AppProfile.AnyWindowClass, profile.ProcessName),
             GlassMode.Native when profile.HookGlass && profile.HookWindowClass is { } windowClass && HookLibrary.IsAvailable =>
                 new CompositeSession(new NativeBackdropSession(profile), new ExplorerHookSession(windowClass, profile.ProcessName)),
             GlassMode.Native => new NativeBackdropSession(profile),

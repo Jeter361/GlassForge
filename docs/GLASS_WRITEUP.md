@@ -479,3 +479,52 @@ All probes restored Mica, zero margins and the ListView colors when stopped (`re
 - Whether probe 3 removes the focus-out flash, or only shortens it (an outside process always lands after `WM_NCACTIVATE(FALSE)`)
 - Light mode, Performance/App history/Startup/Users/Services pages, resize and maximize, and Task Manager's "always on top"
 - The extended-frame alpha-0 effect on the `GlassWindow` search/toolbar strips (no haze reported)
+
+---
+
+# Update 4: Microsoft Word (Oct 1, 2026, night)
+
+**State:** working and confirmed by eye ("looks great", top strip included). It's an opt-in hook toggle, "Glass background (EXPERIMENTAL)", on `WINWORD` profiles. Word needs closing and reopening after the toggle is turned on or off.
+
+## What Word is
+
+| | |
+| --- | --- |
+| Exe | `C:\Program Files\Microsoft Office\root\Office16\WINWORD.EXE` 16.0.20326 (Microsoft 365, Click-to-Run) |
+| Integrity | Medium, same as GlassForge |
+| Main window | `OpusApp` (Win32). Children: `MsoCommandBarDock` → `MsoCommandBar` → `MsoWorkPane` → `NUIPane` → `NetUIHWND` (ribbon, status bar), `_WwF` → `_WwB` → `_WwG` (page), `NUIScrollbar` |
+| Rendering | Office's own UI (NetUI) in a Windows.UI.Composition layer (`dcomp.dll`, `wuceffects.dll`). The GDI bitmaps Office blits into the window are empty (`00000000`) |
+| DWM | `DWMWA_SYSTEMBACKDROP_TYPE` 0, no accent policy; Office sets caption, text and border colours (attributes 35/36/34) from `mso98win32client.dll` |
+| Mica | Office's own: `mso40uiwin32client.dll` calls `Compositor::TryCreateBlurredWallpaperBackdropBrush` (a blur of the **static** wallpaper image) and feeds it into an effect graph `Blend(Blend(param 'BlurredWallpaperBackdrop', Opacity(Flood)), Opacity(Flood))` |
+
+## What didn't work, in order
+
+| Attempt | Result |
+| --- | --- |
+| Native mode (Acrylic + whole-window extend, no injection) | Nothing visible: Office's surface is opaque |
+| Hooking an already-open Word and opening a new window | No brush calls: Office made its brushes at startup |
+| Hooking from launch (`native/tools/launch-hooked.ps1`) and swapping the brush | Sides live, top strip still static brown |
+| Red diagnostic on the graph's wallpaper input | Only the sides turned red |
+| DWM backdrop None/Acrylic, wallpaper file opens (kernel32 and ntdll), Direct2D/GDI gradients and solid colours, accent colour, bitmap uploads | None explained the strip. Moving the window showed it identical everywhere |
+| GlassForge's Native session plus the hook | No brush requests at all: the hook DLL loads into Word ~0.4 s before the UI thread runs hook code, and Office makes its brushes in that gap |
+
+**The actual cause of the static top strip:** the same wallpaper brush, requested in that startup gap before the detour existed. Every earlier "the strip is something else" result was really "the strip's brush was made before we hooked". Once the detour was installed from `DllMain` (a thread started at DLL load), the strip went live as well.
+
+Disassembly note (`dcomp.dll`): the public brush methods share one constructor (`RVA 0xADB94`) with a type argument, **0 = backdrop, 1 = host backdrop, 2 = blurred wallpaper**.
+
+## Final approach (`native/hook/office.cpp`)
+
+- **Early detour:** `DllMain` (process `WINWORD.EXE`) starts `StartOfficeHooksEarly`, a thread that finds the method on a throwaway Compositor (own `DispatcherQueue`) and detours `TryCreateBlurredWallpaperBackdropBrush`. Logged: detour in ~10 ms after load, ahead of all of Office's requests.
+- **Swap:** each request makes Office's brush *and* `ICompositor3::CreateHostBackdropBrush`, and returns the host one. Office's tint graph stays on top, so the glass is darker than Notepad's.
+- **Opt-in:** `DWMWA_USE_HOSTBACKDROPBRUSH` on `OpusApp`.
+- **Focus out went black:** `WM_NCACTIVATE` alone and `WM_ACTIVATEAPP(FALSE)` alone didn't help; swallowing `WM_ACTIVATE(WA_INACTIVE)` did (kept with the other two). The subclass is removed on Detach, which also sends the inactive messages again.
+- **Safety:** the DLL is pinned in Word once installed (subclass and patches must never outlive it).
+- **App side:** `AppProfile.IsWord`, `HookWindowClass = AnyWindowClass ("*")`, so the session hooks any top-level Word window, splash screen included. `GlassHostManager` runs **only** the hook session for Word: no Native session, because there's nothing for DWM attributes to show through. UI: "Glass background (EXPERIMENTAL)" with a red warning (every document shares one process; unsaved work can be lost).
+
+## Not working / untested
+
+- **Turning it off doesn't restore a running Word.** `office.cpp` records Office's effect inputs through `SetSourceParameter` (via the effect factory) to swap the brushes back live, but the first test recorded none (`0 of 0 inputs switched`), so the UI says to close and reopen Word. Next step: find where the brushes go (the earlier survey also saw `SetSourceParameter` only for the second brush of each pair).
+- A Word opened before GlassForge needs restarting once.
+- Native backdrop alone does nothing for Word, as the UI says.
+- Untested: other Office apps (Excel, PowerPoint, Outlook classic use the same `mso40uiwin32client.dll` and probably the same fix), light theme, multiple Word windows, Word crash recovery, and long sessions.
+- Tool: `native/tools/launch-hooked.ps1` launches an exe and hooks every UI thread from its first window (startup surveys).

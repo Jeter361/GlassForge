@@ -130,6 +130,8 @@ internal sealed class ExplorerHookWorker
     private bool IsHookedWindow(nint window)
     {
         if (window == nint.Zero || (!_uwp && NativeMethods.GetAncestor(window, NativeMethods.GaRoot) != window)) return false;
+        if (_windowClass == AppProfile.AnyWindowClass)
+            return NativeMethods.GetWindowThreadProcessId(window, out var ownerId) != 0 && WindowDiscoveryService.IsProcessNamed(ownerId, _processName);
         var name = new StringBuilder(64);
         if (NativeMethods.GetClassName(window, name, name.Capacity) == 0 || name.ToString() != _windowClass) return false;
         // Every UWP app has a CoreWindow; only this profile's app is ours.

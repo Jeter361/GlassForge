@@ -322,6 +322,36 @@
                       </StackPanel>
                     </Border>
                   </StackPanel>
+                  <!-- Word only: the same hook, swapping Office's own Mica for live glass -->
+                  <StackPanel Margin="0,16,0,0">
+                    <StackPanel.Style>
+                      <Style TargetType="StackPanel">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                        <Style.Triggers><DataTrigger Binding="{Binding IsWord}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
+                      </Style>
+                    </StackPanel.Style>
+                    <Grid>
+                      <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                      <StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                          <TextBlock Text="Glass background" FontSize="13" />
+                          <Border Background="#33F87171" CornerRadius="4" Padding="6,1" Margin="8,0,0,0" VerticalAlignment="Center"><TextBlock Text="EXPERIMENTAL" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource DangerBrush}" /></Border>
+                        </StackPanel>
+                        <TextBlock Text="Word paints its own Mica (the static wallpaper) around the page. This swaps it for a live blur of what's behind the window, animated wallpapers included, and keeps it when Word isn't focused. Native backdrop does nothing for Word without this. Close and reopen Word after turning it on or off." FontSize="12" Foreground="{StaticResource SubtleBrush}" TextWrapping="Wrap" Margin="0,2,12,0" />
+                      </StackPanel>
+                      <CheckBox Grid.Column="1" IsChecked="{Binding HookGlass}" VerticalAlignment="Center" />
+                    </Grid>
+                    <Border BorderBrush="{StaticResource DangerBrush}" BorderThickness="1" Background="#1AF87171" CornerRadius="8" Padding="12,10" Margin="0,10,0,0">
+                      <StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                          <TextBlock Style="{StaticResource Icon}" Text="&#xE7BA;" Foreground="{StaticResource DangerBrush}" Margin="0,0,8,0" VerticalAlignment="Center" />
+                          <TextBlock Text="Warning: this injects code into Word" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource DangerBrush}" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <TextBlock FontSize="12" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,0"
+                                   Text="This loads a GlassForge DLL into WINWORD.EXE and changes how Office creates its background. All Word windows share one process: if it ever crashes, every open document closes with it, and unsaved work can be lost. Antivirus may flag it, and Office updates can break it. After turning it off, close and reopen Word to get its own background back; an inactive copy of the DLL stays loaded until then." />
+                      </StackPanel>
+                    </Border>
+                  </StackPanel>
                   <!-- Windows Terminal only: the same hook, frame only -->
                   <StackPanel Margin="0,16,0,0">
                     <StackPanel.Style>

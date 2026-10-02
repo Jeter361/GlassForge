@@ -23,9 +23,10 @@ add_library(GlassForge.Hook SHARED
     hook/dllmain.cpp
     hook/xaml.cpp
     hook/uwp.cpp
+    hook/office.cpp
     hook/exports.def
     hook/log.cpp)
-target_link_libraries(GlassForge.Hook PRIVATE detours user32 gdi32 dwmapi uxtheme comctl32 d2d1 runtimeobject ole32 oleaut32 uuid)
+target_link_libraries(GlassForge.Hook PRIVATE detours user32 gdi32 dwmapi uxtheme comctl32 d2d1 runtimeobject CoreMessaging ole32 oleaut32 uuid)
 target_compile_definitions(GlassForge.Hook PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_compile_options(GlassForge.Hook PRIVATE /W4 /permissive-)
 
