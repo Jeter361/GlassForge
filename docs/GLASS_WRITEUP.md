@@ -528,3 +528,20 @@ Disassembly note (`dcomp.dll`): the public brush methods share one constructor (
 - Native backdrop alone does nothing for Word, as the UI says.
 - Untested: other Office apps (Excel, PowerPoint, Outlook classic use the same `mso40uiwin32client.dll` and probably the same fix), light theme, multiple Word windows, Word crash recovery, and long sessions.
 - Tool: `native/tools/launch-hooked.ps1` launches an exe and hooks every UI thread from its first window (startup surveys).
+
+---
+
+# Update 5: Excel and PowerPoint (started, Oct 1, 2026, night)
+
+**State:** measured only; no code yet. The handoff prompt for the next session is `docs/NEXT_AGENT_PROMPT.md`.
+
+| | Excel | PowerPoint |
+| --- | --- | --- |
+| Exe | `Office16\EXCEL.EXE` | `Office16\POWERPNT.EXE` |
+| Integrity | Medium | not measured |
+| Main window class | `XLMAIN` | not measured (probably `PPTFrameClass`) |
+| DWM backdrop | 0 | not measured |
+| Office UI library | `mso40uiwin32client.dll`, `dcomp.dll`, `wuceffects.dll` loaded, same as Word | not measured |
+
+The first PowerPoint launch showed no process (cause unknown). Plan: generalise Word's `WINWORD.EXE`/`OpusApp` checks
+(hook DLL) and `IsWord` (app) to an Office list, then test each app from a fresh launch through GlassForge.
