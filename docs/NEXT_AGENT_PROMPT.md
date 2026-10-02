@@ -46,7 +46,7 @@ in **`C:\glass\GlassForge`**, with local commits only.
 | Microsoft Word | **Working, confirmed by me by eye.** Opt-in hook, "Glass background (EXPERIMENTAL)" | `58a264e` | "Update 4" |
 | Excel | **Working.** Confirmed by eye. Opt-in hook, same Office swap as Word | `a87b745` | "Update 5" |
 | PowerPoint | **Working.** Confirmed by eye. Opt-in hook, same Office swap as Word | `a87b745` | "Update 5" |
-| Microsoft Teams | **Chrome/sidebar working, chat pane parked.** Opt-in hook + host-backdrop opt-in | (this session) | "Update 6" |
+| Microsoft Teams | **Chrome/sidebar working, chat pane parked.** Opt-in hook + host-backdrop opt-in | `ee1118c` | "Update 6" |
 | Later | Calculator, Paint, Snipping Tool, Clock, Photos, Media Player | | |
 
 ### How Word was solved (Excel and PowerPoint very likely work the same way)

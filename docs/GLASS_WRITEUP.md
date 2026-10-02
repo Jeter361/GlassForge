@@ -589,7 +589,7 @@ restarting: Excel and PowerPoint both hook on the first launch.
 # Update 6: Microsoft Teams (Oct 1, 2026, late)
 
 **State:** the native chrome (borders, rails, sidebar) works as an opt-in hook and is confirmed by eye. The main chat
-pane stays opaque and is **parked** (see below).
+pane stays opaque and is **parked** (see below). Commit `ee1118c` (local only).
 
 ## What Teams is
 
