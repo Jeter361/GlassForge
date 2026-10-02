@@ -638,3 +638,59 @@ DevTools (large elements only, leaving message bubbles), and then live wallpaper
 - The keep-active subclass means the first click on a Teams window can be spent on activation (same parked issue as
   Office; see `office.cpp` `KeepActive`).
 - Untested: light mode, multiple Teams windows and popouts, minimize/restore, and Teams updates.
+
+---
+
+# Update 7: The "Settings glossy blur" look for Explorer — investigated, blocked
+
+**Goal (user):** make Explorer look like Settings: a vibrant, untinted, strongly blurred live wallpaper, not the grey
+tinted material. Windows Settings is the flagship because it puts a **host backdrop brush** into the XAML window's
+system backdrop (`uwp.cpp`, `ICompositor3::CreateHostBackdropBrush`) - a live blur of the desktop, no tint.
+
+**Explorer today** uses a DWM **Acrylic** system backdrop (`DWMWA_SYSTEMBACKDROP_TYPE = 3`) plus the paint hooks. On
+Windows 11 both Mica and the Acrylic system backdrops sample the **static** wallpaper and carry a tint - hence grey.
+
+Routes tried, in order, all reverted:
+
+| Attempt | Result |
+| --- | --- |
+| DWM Acrylic system backdrop | Static wallpaper, tinted grey (the current Explorer look) |
+| Whole-window `SetWindowCompositionAttribute` acrylic with a transparent tint | Does not render on Windows 11 (black) |
+| `ICompositorDesktopInterop::CreateDesktopWindowTarget` + a host-backdrop `SpriteVisual` behind the content | Target created (`hr=0`) but occluded by the window's content (a red test showed nothing) |
+| WinUI 3 `AcrylicBrush` with `BackgroundSource=HostBackdrop` via `XamlReader` | That property does not exist in WinUI 3 (`IAcrylicBrush` has only Tint*/AlwaysUseFallback); it is UWP/system-XAML only. It samples the app background, so it stays grey |
+| Custom `XamlCompositionBrushBase` (Windhawk's technique) whose `OnConnected` builds `Compositor.CreateBackdropBrush()` and is set as the elements' `Background` | **Renders** (proved by painting it red: the command bar, nav bar and Gallery turned red) but samples the app's own background, which is the tinted material - so grey, not the desktop |
+
+**Why it can't work:** the vibrant look needs a **host-backdrop brush** (`CreateHostBackdropBrush`), and that exists
+only in the **system** `Windows.UI.Composition`. Explorer's XAML is WinUI 3 (`Microsoft.UI.Composition`), which has
+**no** host-backdrop brush - only `CreateBackdropBrush`, which samples the app's own background. The system compositor
+cannot be injected into Explorer's XAML island. So the untinted, animated-wallpaper look Settings has is **not
+reachable for Explorer** with the APIs Windows exposes; this is an API limitation, not an approach problem.
+
+Method notes for a future attempt: the Windows App SDK winmds live in the runtime package
+(`Microsoft.WindowsAppRuntime.1.5_...\Microsoft.UI.Xaml.winmd` and `Microsoft.UI.winmd`); C++/WinRT projections can be
+generated from them with `cppwinrt.exe` (input the runtime winmds plus `UnionMetadata\Windows.winmd` so the
+`CPPWINRT_VERSION` checks agree). All of it was removed.
+
+---
+
+# Update 8: Microsoft Outlook (new client, `olk`) — borders only
+
+**State:** native mode gives the transparent top/left border, confirmed by eye. Full glass is parked (WebView2).
+
+| | |
+| --- | --- |
+| Exe | `...\WindowsApps\Microsoft.OutlookForWindows_1.2026.922.300_x64__8wekyb3d8bbwe\olk.exe` (MSIX) |
+| Integrity | Medium |
+| Main window | `Outlook Host` |
+| Framework | **WebView2/Chromium** + `twinui.dll` (same shape as the new Teams) |
+| DWM backdrop | 2 (**Mica**), dark mode 1 |
+
+**What was tried:** adding `olk.exe` + `Outlook Host` to the opt-in Office/Teams path (host-backdrop opt-in +
+keep-active). The window opted in cleanly, but the borders then showed the **brown static wallpaper** (Mica), and
+there were **no** `wallpaper brush request` lines - so Outlook's twinui chrome is Mica-based, not host-backdrop, and
+the opt-in only revealed the static material. Reverted; the profile's hook is off and native mode gives the borders.
+
+**Conclusion:** the new Outlook is WebView2, so the content can't be made glass the same way Teams can't (the WebView2
+environment is created before a window exists, so a window-triggered hook is too late to inject a script). **Classic
+Outlook** (`OUTLOOK.EXE`, which loads `mso40uiwin32client.dll`) would be a different case - it would go through the
+Office path (like Word/Excel) where the brush swap gave live glass. Untested here (the new client is what runs).

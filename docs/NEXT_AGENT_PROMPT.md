@@ -47,6 +47,8 @@ in **`C:\glass\GlassForge`**, with local commits only.
 | Excel | **Working.** Confirmed by eye. Opt-in hook, same Office swap as Word | `a87b745` | "Update 5" |
 | PowerPoint | **Working.** Confirmed by eye. Opt-in hook, same Office swap as Word | `a87b745` | "Update 5" |
 | Microsoft Teams | **Chrome/sidebar working, chat pane parked.** Opt-in hook + host-backdrop opt-in | `ee1118c` | "Update 6" |
+| Explorer "glossy" look | **Dead end.** WinUI 3 has no host-backdrop brush; the vibrant Settings look isn't reachable on Explorer | n/a | "Update 7" |
+| Microsoft Outlook (new, `olk`) | **Native borders work; full glass parked** (WebView2). Classic `OUTLOOK.EXE` untested and would follow the Office path | n/a | "Update 8" |
 | Later | Calculator, Paint, Snipping Tool, Clock, Photos, Media Player | | |
 
 ### How Word was solved (Excel and PowerPoint very likely work the same way)
