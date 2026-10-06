@@ -178,6 +178,7 @@ float4 PS(float4 position : SV_Position) : SV_Target
         ComPtr<ID3D11PixelShader> ps;
         ComPtr<ID3D11Buffer> params;
         ComPtr<ID3D11BlendState> noBlend;
+        ComPtr<ID3D11RasterizerState> scissored; // partial presents: only the dirty rectangles are processed
         ComPtr<ID3DDeviceContextState> state;
         bool ok = false;
     };
@@ -381,13 +382,15 @@ float4 PS(float4 position : SV_Position) : SV_Target
         const D3D_FEATURE_LEVEL level = device->GetFeatureLevel();
         const UINT flags = (device->GetCreationFlags() & D3D11_CREATE_DEVICE_SINGLETHREADED) ? D3D11_1_CREATE_DEVICE_CONTEXT_STATE_SINGLETHREADED : 0;
         D3D11_BUFFER_DESC params{ sizeof(Params), D3D11_USAGE_DEFAULT, D3D11_BIND_CONSTANT_BUFFER };
+        D3D11_RASTERIZER_DESC scissor{ D3D11_FILL_SOLID, D3D11_CULL_NONE, FALSE, 0, 0.f, 0.f, TRUE, TRUE, FALSE, FALSE };
         D3D11_BLEND_DESC blend{};
         blend.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
         r.ok = SUCCEEDED(device1->CreateDeviceContextState(flags, &level, 1, D3D11_SDK_VERSION, __uuidof(ID3D11Device1), nullptr, &r.state))
             && SUCCEEDED(device->CreateVertexShader(g_vsCode->GetBufferPointer(), g_vsCode->GetBufferSize(), nullptr, &r.vs))
             && SUCCEEDED(device->CreatePixelShader(g_psCode->GetBufferPointer(), g_psCode->GetBufferSize(), nullptr, &r.ps))
             && SUCCEEDED(device->CreateBuffer(&params, nullptr, &r.params))
-            && SUCCEEDED(device->CreateBlendState(&blend, &r.noBlend));
+            && SUCCEEDED(device->CreateBlendState(&blend, &r.noBlend))
+            && SUCCEEDED(device->CreateRasterizerState(&scissor, &r.scissored));
         Log(L"dxgi: device %p (feature level %X) resources %s", device, level, r.ok ? L"ready" : L"FAILED");
         return r;
     }
@@ -479,7 +482,10 @@ float4 PS(float4 position : SV_Position) : SV_Target
         chain.haveBackground = true;
     }
 
-    void Process(IDXGISwapChain* swapChain, UINT flags)
+    // A partial present (Present1 with dirty rectangles: Chromium/WebView2 redrawing only what changed under the
+    // mouse) leaves the rest of the back buffer as last presented, which is already glass. Processing it again would
+    // key it twice and erode it a bit more each time, so only the dirty rectangles are processed.
+    void Process(IDXGISwapChain* swapChain, UINT flags, const DXGI_PRESENT_PARAMETERS* partial = nullptr)
     {
         if (flags & DXGI_PRESENT_TEST) return;
         AcquireSRWLockExclusive(&g_lock);
@@ -588,7 +594,21 @@ float4 PS(float4 position : SV_Position) : SV_Target
         context->PSSetShader(resources.ps.Get(), nullptr, 0);
         context->PSSetShaderResources(0, 1, chain.copyView.GetAddressOf());
         context->PSSetConstantBuffers(0, 1, resources.params.GetAddressOf());
-        context->Draw(3, 0);
+        if (partial && partial->DirtyRectsCount > 0 && partial->pDirtyRects)
+        {
+            context->RSSetState(resources.scissored.Get());
+            for (UINT first = 0; first < partial->DirtyRectsCount; first += D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE)
+            {
+                const UINT count = std::min<UINT>(partial->DirtyRectsCount - first, D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE);
+                for (UINT i = 0; i < count; ++i)
+                {
+                    context->RSSetScissorRects(1, &partial->pDirtyRects[first + i]);
+                    context->Draw(3, 0);
+                }
+            }
+            context->RSSetState(nullptr);
+        }
+        else context->Draw(3, 0);
         ID3D11ShaderResourceView* none = nullptr;
         context->PSSetShaderResources(0, 1, &none);
         context->OMSetRenderTargets(0, nullptr, nullptr);
@@ -604,7 +624,7 @@ float4 PS(float4 position : SV_Position) : SV_Target
 
     HRESULT STDMETHODCALLTYPE Hook_Present1(IDXGISwapChain1* swapChain, UINT sync, UINT flags, const DXGI_PRESENT_PARAMETERS* parameters)
     {
-        Process(swapChain, flags);
+        Process(swapChain, flags, parameters);
         return Real_Present1(swapChain, sync, flags, parameters);
     }
 
