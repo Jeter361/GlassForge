@@ -39,6 +39,7 @@ public sealed class AppProfile : INotifyPropertyChanged
     private TitleBarTheme _titleBar;
     private bool _keepGlassWhenUnfocused = true;
     private bool _solidTextArea;
+    private bool _dxgiGlass;
     private bool _explorerGlass;
     private string _executablePath = "";
     private System.Windows.Media.ImageSource? _icon;
@@ -136,6 +137,12 @@ public sealed class AppProfile : INotifyPropertyChanged
     /// where Windows composes the see-through text area straight instead of additively, so the text vanishes with it.
     /// </summary>
     public bool SolidTextArea { get => _solidTextArea; set => Set(ref _solidTextArea, value); }
+    /// <summary>
+    /// Experimental, Native mode: glass inside apps that draw every pixel with Direct3D (Qt, Chromium/Electron),
+    /// by turning their background color transparent on every frame (DxgiGlassSession). Injects code and restarts the
+    /// app when turned on or off.
+    /// </summary>
+    public bool DxgiGlass { get => _dxgiGlass; set => Set(ref _dxgiGlass, value); }
 
     [JsonIgnore] public string OpacityLabel => $"{Math.Round(WindowOpacity / 255d * 100)}%";
     [JsonIgnore] public string Initial => string.IsNullOrWhiteSpace(DisplayName) ? "?" : DisplayName.TrimStart()[..1].ToUpperInvariant();

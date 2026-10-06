@@ -11,6 +11,15 @@ public partial class App : System.Windows.Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        // Developer check of the app diagnosis: --diagnose name[,name...] writes %LOCALAPPDATA%\GlassForge\diagnosis.txt
+        // and exits, before the single-instance handshake so a running GlassForge is left alone. Read-only.
+        var diagnose = Array.IndexOf(e.Args, "--diagnose");
+        if (diagnose >= 0 && diagnose + 1 < e.Args.Length)
+        {
+            AppDiagnosisService.WriteReport(e.Args[diagnose + 1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+            Shutdown();
+            return;
+        }
         // Two instances fight over the same target windows and leave them translucent on exit.
         var (instance, outcome) = InstanceCoordinator.Acquire();
         if (instance is null)

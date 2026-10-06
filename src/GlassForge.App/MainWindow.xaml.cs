@@ -20,6 +20,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     // Edits apply live, once the user pauses: a slider drag or a typed name restarts the session once, not per tick.
     private readonly DispatcherTimer _applyTimer = new() { Interval = TimeSpan.FromMilliseconds(400) };
     private readonly HashSet<AppProfile> _pending = [];
+    // Profiles whose app currently runs with the experimental DXGI glass: when that ends (the option, the app's switch,
+    // the mode, or removing the app), the app is restarted once without the hook, which can't leave a running app.
+    private readonly HashSet<Guid> _dxgiOn = [];
     private IReadOnlyList<RunningApplication> _allRunningApps = [];
     private AppProfile? _selectedProfile;
     private bool _reallyClose;
@@ -56,6 +59,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             profile.PropertyChanged += ProfileChanged;
         }
         if (renamed) SaveProfiles();
+        foreach (var profile in Profiles.Where(UsesDxgiGlass)) _dxgiOn.Add(profile.Id);
         SelectedProfile = Profiles.FirstOrDefault();
         DataContext = this;
         InitializeComponent();
@@ -104,9 +108,20 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         _applyTimer.Stop();
         SaveProfiles();
-        foreach (var profile in _pending.Where(Profiles.Contains)) _hosts.Restart(profile);
+        foreach (var profile in _pending.Where(Profiles.Contains))
+        {
+            _hosts.Restart(profile);
+            if (UsesDxgiGlass(profile)) _dxgiOn.Add(profile.Id);
+            else if (_dxgiOn.Remove(profile.Id)) EndDxgiGlass(profile.ProcessName);
+        }
         _pending.Clear();
     }
+
+    private static bool UsesDxgiGlass(AppProfile profile) =>
+        profile.Enabled && profile.Mode == GlassMode.Native && profile.DxgiGlass && !profile.HasHook && HookLibrary.IsAvailable;
+
+    // Closing and restarting the app takes seconds; keep it off the UI thread.
+    private static void EndDxgiGlass(string processName) => Task.Run(() => DxgiGlassSession.RelaunchWithout(processName));
 
     // The add-app picker: running apps, minus the ones that already have glass. Only scanned while it's open.
     private void ShowAddApp(object sender, RoutedEventArgs e) => AddAppPopup.IsOpen = true;
@@ -211,6 +226,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         remove.PropertyChanged -= ProfileChanged;
         _pending.Remove(remove);
         _hosts.Stop(remove.Id);
+        if (_dxgiOn.Remove(remove.Id)) EndDxgiGlass(remove.ProcessName);
         Profiles.Remove(remove);
         SelectedProfile = Profiles.FirstOrDefault();
         SaveProfiles();

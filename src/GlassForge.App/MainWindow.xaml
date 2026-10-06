@@ -231,6 +231,30 @@
                   <StackPanel><TextBlock Text="Stay glass when unfocused" Style="{StaticResource OptionTitle}" /><TextBlock Text="Windows normally goes flat when you click away." Style="{StaticResource OptionHint}" /></StackPanel>
                   <CheckBox Grid.Column="1" IsChecked="{Binding KeepGlassWhenUnfocused}" VerticalAlignment="Center" />
                 </Grid>
+                <!-- Apps without their own hook: the experimental Direct3D glass -->
+                <StackPanel Margin="0,16,0,0">
+                  <StackPanel.Style>
+                    <Style TargetType="StackPanel">
+                      <Style.Triggers><DataTrigger Binding="{Binding HasHook}" Value="True"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger></Style.Triggers>
+                    </Style>
+                  </StackPanel.Style>
+                  <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                    <StackPanel>
+                      <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="Glass inside the app" Style="{StaticResource OptionTitle}" />
+                        <Border Background="#33F87171" CornerRadius="4" Padding="6,1" Margin="8,0,0,0" VerticalAlignment="Center"><TextBlock Text="EXPERIMENTAL" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource DangerBrush}" /></Border>
+                      </StackPanel>
+                      <TextBlock Text="For apps that paint every pixel with Direct3D (Qt, Chromium), where Native shows nothing: their background color turns to glass. Tested on LogMeIn Resolve." Style="{StaticResource OptionHint}" />
+                    </StackPanel>
+                    <CheckBox Grid.Column="1" IsChecked="{Binding DxgiGlass}" VerticalAlignment="Center" />
+                  </Grid>
+                  <Grid Margin="0,10,0,0">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition /></Grid.ColumnDefinitions>
+                    <TextBlock Style="{StaticResource Icon}" Text="&#xE7BA;" FontSize="12" Foreground="{StaticResource DangerBrush}" VerticalAlignment="Top" Margin="0,2,8,0" />
+                    <TextBlock Grid.Column="1" Text="Injects code into the app and restarts it when turned on or off (open work and remote sessions in it are closed). Turn on Whole window too." FontSize="12" Foreground="{StaticResource DangerBrush}" TextWrapping="Wrap" Margin="0,0,16,0" />
+                  </Grid>
+                </StackPanel>
               </StackPanel>
 
               <!-- Overlay options -->

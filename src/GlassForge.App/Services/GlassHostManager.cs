@@ -35,6 +35,9 @@ public sealed class GlassHostManager : IDisposable
                 new ExplorerHookSession(AppProfile.AnyWindowClass, profile.ProcessName),
             GlassMode.Native when profile.HookGlass && profile.HookWindowClass is { } windowClass && HookLibrary.IsAvailable =>
                 new CompositeSession(new NativeBackdropSession(profile), new ExplorerHookSession(windowClass, profile.ProcessName)),
+            // Direct3D apps: the native session sets Acrylic and the frame, the hook clears the app's own background.
+            GlassMode.Native when profile.DxgiGlass && !profile.HasHook && HookLibrary.IsAvailable =>
+                new CompositeSession(new NativeBackdropSession(profile), new DxgiGlassSession(profile)),
             GlassMode.Native => new NativeBackdropSession(profile),
             _ => new GlassHostSession(profile)
         };
