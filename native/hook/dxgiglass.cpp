@@ -53,7 +53,7 @@ namespace
     SRWLOCK g_lock = SRWLOCK_INIT;
 
     // How much of the background stays: 0 = fully clear, 1 = untouched. A little keeps text readable on busy wallpaper.
-    constexpr float BackgroundFloor = 0.55f;
+    constexpr float BackgroundFloor = 0.12f;
     // When to look for the background color: a few times early (apps show a splash screen in a different color first),
     // then every 600 frames in case the app switches theme.
     bool DetectNow(unsigned frame) { return frame == 0 || frame == 30 || frame == 120 || frame == 300 || frame % 600 == 0; }
@@ -176,7 +176,9 @@ float4 PS(float4 position : SV_Position) : SV_Target
         unsigned bestCount = 0;
         for (const auto& [pixel, count] : counts)
             if (count > bestCount) { best = pixel; bestCount = count; }
-        if (bestCount * 4 < samples) return; // no dominant color: leave the frame alone
+        // A first color needs a clear plurality; replacing a known one needs a majority, so a dialog or a dark page
+        // passing by doesn't switch the key.
+        if (bestCount * (chain.haveBackground ? 2 : 4) < samples) return;
         float first = (best & 0xFF) / 255.f, second = ((best >> 8) & 0xFF) / 255.f, third = ((best >> 16) & 0xFF) / 255.f;
         const bool bgra = desc.Format == DXGI_FORMAT_B8G8R8A8_UNORM;
         const float found[3] = { bgra ? third : first, second, bgra ? first : third };
@@ -336,6 +338,73 @@ float4 PS(float4 position : SV_Position) : SV_Target
         return Real_CreateSwapChainForHwnd(factory, device, window, desc, fullscreen, output, chain);
     }
 
+    // Chromium's GPU process already draws through DirectComposition, but asks for its swap chains with alpha ignored.
+    HRESULT STDMETHODCALLTYPE Hook_CreateSwapChainForComposition(IDXGIFactory2* factory, IUnknown* device, const DXGI_SWAP_CHAIN_DESC1* desc,
+        IDXGIOutput* output, IDXGISwapChain1** chain)
+    {
+        if (desc && (desc->AlphaMode == DXGI_ALPHA_MODE_IGNORE || desc->AlphaMode == DXGI_ALPHA_MODE_UNSPECIFIED) && ComposableFormat(desc->Format))
+        {
+            DXGI_SWAP_CHAIN_DESC1 premultiplied = *desc;
+            premultiplied.AlphaMode = DXGI_ALPHA_MODE_PREMULTIPLIED;
+            const HRESULT result = Real_CreateSwapChainForComposition(factory, device, &premultiplied, output, chain);
+            Log(L"dxgi: composition swap chain %ux%u format %d made premultiplied (%08X)", desc->Width, desc->Height, desc->Format, result);
+            if (SUCCEEDED(result)) return result;
+        }
+        return Real_CreateSwapChainForComposition(factory, device, desc, output, chain);
+    }
+
+    // Chromium draws in a separate GPU process that the main process starts. That child gets the hook at birth: it is
+    // created suspended, its import table gains this DLL (Detours), and only then does it run. Renderers are sandboxed
+    // and draw nothing to the screen, so only the GPU process is touched.
+    using CreateProcessWFn = BOOL(WINAPI*)(LPCWSTR, LPWSTR, LPSECURITY_ATTRIBUTES, LPSECURITY_ATTRIBUTES, BOOL, DWORD, LPVOID, LPCWSTR,
+        LPSTARTUPINFOW, LPPROCESS_INFORMATION);
+    using CreateProcessAsUserWFn = BOOL(WINAPI*)(HANDLE, LPCWSTR, LPWSTR, LPSECURITY_ATTRIBUTES, LPSECURITY_ATTRIBUTES, BOOL, DWORD, LPVOID,
+        LPCWSTR, LPSTARTUPINFOW, LPPROCESS_INFORMATION);
+    CreateProcessWFn Real_CreateProcessW = CreateProcessW;
+    CreateProcessAsUserWFn Real_CreateProcessAsUserW = CreateProcessAsUserW;
+
+    bool IsGpuProcess(LPCWSTR commandLine)
+    {
+        return commandLine && wcsstr(commandLine, L"--type=gpu-process");
+    }
+
+    void InjectChild(const PROCESS_INFORMATION* process, bool resume)
+    {
+        char dll[MAX_PATH]{};
+        HMODULE self = nullptr;
+        GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            reinterpret_cast<LPCWSTR>(&InjectChild), &self);
+        GetModuleFileNameA(self, dll, MAX_PATH);
+        LPCSTR dlls[] = { dll };
+        const BOOL ok = DetourUpdateProcessWithDll(process->hProcess, dlls, 1);
+        Log(L"dxgi: GPU process %lu %s", process->dwProcessId, ok ? L"gets the hook" : L"could NOT be hooked");
+        if (resume) ResumeThread(process->hThread);
+    }
+
+    BOOL WINAPI Hook_CreateProcessW(LPCWSTR application, LPWSTR commandLine, LPSECURITY_ATTRIBUTES processAttributes,
+        LPSECURITY_ATTRIBUTES threadAttributes, BOOL inherit, DWORD flags, LPVOID environment, LPCWSTR directory, LPSTARTUPINFOW startup,
+        LPPROCESS_INFORMATION process)
+    {
+        const bool gpu = IsGpuProcess(commandLine);
+        const bool resume = gpu && !(flags & CREATE_SUSPENDED);
+        const BOOL ok = Real_CreateProcessW(application, commandLine, processAttributes, threadAttributes, inherit,
+            gpu ? flags | CREATE_SUSPENDED : flags, environment, directory, startup, process);
+        if (ok && gpu) InjectChild(process, resume);
+        return ok;
+    }
+
+    BOOL WINAPI Hook_CreateProcessAsUserW(HANDLE token, LPCWSTR application, LPWSTR commandLine, LPSECURITY_ATTRIBUTES processAttributes,
+        LPSECURITY_ATTRIBUTES threadAttributes, BOOL inherit, DWORD flags, LPVOID environment, LPCWSTR directory, LPSTARTUPINFOW startup,
+        LPPROCESS_INFORMATION process)
+    {
+        const bool gpu = IsGpuProcess(commandLine);
+        const bool resume = gpu && !(flags & CREATE_SUSPENDED);
+        const BOOL ok = Real_CreateProcessAsUserW(token, application, commandLine, processAttributes, threadAttributes, inherit,
+            gpu ? flags | CREATE_SUSPENDED : flags, environment, directory, startup, process);
+        if (ok && gpu) InjectChild(process, resume);
+        return ok;
+    }
+
     HRESULT STDMETHODCALLTYPE Hook_CreateSwapChain(IDXGIFactory* factory, IUnknown* device, DXGI_SWAP_CHAIN_DESC* desc, IDXGISwapChain** chain)
     {
         ComPtr<IDXGIFactory2> factory2;
@@ -412,6 +481,9 @@ void InstallDxgiGlass()
         DetourAttach(reinterpret_cast<PVOID*>(&Real_Present1), reinterpret_cast<PVOID>(Hook_Present1));
         DetourAttach(reinterpret_cast<PVOID*>(&Real_CreateSwapChain), reinterpret_cast<PVOID>(Hook_CreateSwapChain));
         DetourAttach(reinterpret_cast<PVOID*>(&Real_CreateSwapChainForHwnd), reinterpret_cast<PVOID>(Hook_CreateSwapChainForHwnd));
+        DetourAttach(reinterpret_cast<PVOID*>(&Real_CreateSwapChainForComposition), reinterpret_cast<PVOID>(Hook_CreateSwapChainForComposition));
+        DetourAttach(reinterpret_cast<PVOID*>(&Real_CreateProcessW), reinterpret_cast<PVOID>(Hook_CreateProcessW));
+        DetourAttach(reinterpret_cast<PVOID*>(&Real_CreateProcessAsUserW), reinterpret_cast<PVOID>(Hook_CreateProcessAsUserW));
         const LONG result = DetourTransactionCommit();
         g_installed = result == NO_ERROR;
         Log(L"dxgi: present and swap chain detours %s (%ld)", g_installed ? L"installed" : L"FAILED", result);
@@ -430,6 +502,9 @@ void RemoveDxgiGlass()
         DetourDetach(reinterpret_cast<PVOID*>(&Real_Present1), reinterpret_cast<PVOID>(Hook_Present1));
         DetourDetach(reinterpret_cast<PVOID*>(&Real_CreateSwapChain), reinterpret_cast<PVOID>(Hook_CreateSwapChain));
         DetourDetach(reinterpret_cast<PVOID*>(&Real_CreateSwapChainForHwnd), reinterpret_cast<PVOID>(Hook_CreateSwapChainForHwnd));
+        DetourDetach(reinterpret_cast<PVOID*>(&Real_CreateSwapChainForComposition), reinterpret_cast<PVOID>(Hook_CreateSwapChainForComposition));
+        DetourDetach(reinterpret_cast<PVOID*>(&Real_CreateProcessW), reinterpret_cast<PVOID>(Hook_CreateProcessW));
+        DetourDetach(reinterpret_cast<PVOID*>(&Real_CreateProcessAsUserW), reinterpret_cast<PVOID>(Hook_CreateProcessAsUserW));
         g_installed = DetourTransactionCommit() != NO_ERROR;
         g_chains.clear();
         g_devices.clear();
