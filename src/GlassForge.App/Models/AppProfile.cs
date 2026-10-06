@@ -101,6 +101,21 @@ public sealed class AppProfile : INotifyPropertyChanged
     [JsonIgnore] public string OfficeExeName => ProcessName.ToUpperInvariant() + ".EXE";
     /// <summary>The top-level window class the hook styles in this app, or null when the app has no hook mode.</summary>
     [JsonIgnore] public string? HookWindowClass => IsExplorer ? "CabinetWClass" : IsTerminal ? "CASCADIA_HOSTING_WINDOW_CLASS" : IsSettings ? UwpContentWindowClass : IsOffice ? AnyWindowClass : null;
+    /// <summary>The app has an experimental hook mode, so the editor offers its toggle.</summary>
+    [JsonIgnore] public bool HasHook => HookWindowClass is not null;
+    /// <summary>What the hook does for this app, in one or two sentences.</summary>
+    [JsonIgnore] public string HookSummary =>
+        IsExplorer ? "Glass behind the file list, navigation pane, scrollbars and toolbar, not just the title bar."
+        : IsTerminal ? "Live glass behind the tab row only; needs a Terminal theme with a transparent tab row."
+        : IsSettings ? "Swaps Settings' static Mica for a live blur, animated wallpapers included."
+        : string.Equals(ProcessName, "ms-teams", StringComparison.OrdinalIgnoreCase) ? "Live glass on Teams' title bar and frame; the chat pane stays solid."
+        : $"Swaps {OfficeDisplayName}'s static Mica for a live blur. The first click on a window may only activate it.";
+    /// <summary>The red warning under the toggle: this is the one feature that injects code.</summary>
+    [JsonIgnore] public string HookWarning =>
+        IsExplorer ? "Injects code into explorer.exe, which also runs your taskbar and desktop: a bug can crash them (Windows restarts Explorer). Antivirus may flag it."
+        : IsTerminal ? "Injects code into Windows Terminal. All tabs share one process, so a crash closes every tab. Antivirus may flag it."
+        : IsSettings ? "Injects code into Settings. A crash only closes Settings. Antivirus may flag it."
+        : $"Injects code into {OfficeDisplayName}. Save your work first: a crash closes every {OfficeDisplayName} window. Fully turning it off needs a restart of the app.";
     /// <summary>A UWP app's UI thread owns this window, hosted inside ApplicationFrameHost's frame.</summary>
     public const string UwpContentWindowClass = "Windows.UI.Core.CoreWindow";
     /// <summary>Every top-level window of the app's process: Word makes its backdrop at startup, so the hook has to
@@ -165,6 +180,9 @@ public sealed class AppProfile : INotifyPropertyChanged
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsSettings)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsOffice)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsNotepad)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HasHook)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HookSummary)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HookWarning)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(OfficeDisplayName)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(OfficeExeName)));
         }

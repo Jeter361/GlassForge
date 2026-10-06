@@ -1,29 +1,44 @@
 ﻿<Window x:Class="GlassForge.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="GlassForge" Icon="Assets/GlassForge.ico" Width="1220" Height="780" MinWidth="1080" MinHeight="660"
+        Title="GlassForge" Icon="Assets/GlassForge.ico" Width="980" Height="700" MinWidth="820" MinHeight="560"
         Background="Transparent" WindowStartupLocation="CenterScreen"
         FontFamily="{StaticResource UiFont}" TextOptions.TextFormattingMode="Display"
         StateChanged="WindowStateChanged">
   <Window.Resources>
+    <BooleanToVisibilityConverter x:Key="ShowIf" />
     <!-- Editor sections that only apply to one glass mode -->
     <Style x:Key="HostOnly" TargetType="StackPanel">
       <Style.Triggers><DataTrigger Binding="{Binding Mode}" Value="Native"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger></Style.Triggers>
+    </Style>
+    <Style x:Key="NativeOnly" TargetType="StackPanel">
+      <Setter Property="Visibility" Value="Collapsed" />
+      <Style.Triggers><DataTrigger Binding="{Binding Mode}" Value="Native"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
     </Style>
     <!-- App icons, with the letter tile as the fallback when an app has none -->
     <Style x:Key="AppIcon" TargetType="Image">
       <Setter Property="RenderOptions.BitmapScalingMode" Value="HighQuality" />
       <Style.Triggers><DataTrigger Binding="{Binding HasIcon}" Value="False"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger></Style.Triggers>
     </Style>
-    <Style x:Key="LetterTile" TargetType="Grid">
+    <Style x:Key="LetterTile" TargetType="Border">
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Background" Value="{StaticResource RaisedBrush}" />
       <Style.Triggers><DataTrigger Binding="{Binding HasIcon}" Value="True"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger></Style.Triggers>
     </Style>
-    <Style x:Key="LetterTileBorder" TargetType="Border">
-      <Style.Triggers><DataTrigger Binding="{Binding HasIcon}" Value="True"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger></Style.Triggers>
+    <!-- One option row: title, a single line of explanation, and a switch on the right -->
+    <Style x:Key="OptionTitle" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="13" />
     </Style>
-    <Style x:Key="NativeOnly" TargetType="StackPanel">
-      <Setter Property="Visibility" Value="Collapsed" />
-      <Style.Triggers><DataTrigger Binding="{Binding Mode}" Value="Native"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
+    <Style x:Key="OptionHint" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="Foreground" Value="{StaticResource SubtleBrush}" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+      <Setter Property="Margin" Value="0,2,16,0" />
+    </Style>
+    <Style x:Key="Divider" TargetType="Border">
+      <Setter Property="Height" Value="1" />
+      <Setter Property="Background" Value="{StaticResource BorderBrush}" />
+      <Setter Property="Margin" Value="0,22,0,20" />
     </Style>
   </Window.Resources>
 
@@ -35,14 +50,13 @@
     <Grid.RowDefinitions>
       <RowDefinition Height="44" />
       <RowDefinition Height="*" />
-      <RowDefinition Height="38" />
     </Grid.RowDefinitions>
 
     <!-- Title bar -->
     <Grid Grid.Row="0">
       <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
       <StackPanel Orientation="Horizontal" Margin="18,0,0,0" VerticalAlignment="Center">
-        <Grid Width="20" Height="20" Margin="0,0,10,0">
+        <Grid Width="18" Height="18" Margin="0,0,10,0">
           <Border CornerRadius="5" Margin="0,0,5,5">
             <Border.Background>
               <LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#C4B5FD" Offset="0" /><GradientStop Color="#7C3AED" Offset="1" /></LinearGradientBrush>
@@ -51,9 +65,10 @@
           <Border CornerRadius="5" Margin="5,5,0,0" Background="#80FFFFFF" BorderBrush="#C0FFFFFF" BorderThickness="1" />
         </Grid>
         <TextBlock Text="GlassForge" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" />
-        <TextBlock Text="Desktop materials, refined" FontSize="12" Foreground="{StaticResource SubtleBrush}" VerticalAlignment="Center" Margin="12,1,0,0" />
       </StackPanel>
-      <CheckBox x:Name="StartupCheckBox" Grid.Column="1" Content="Launch at startup" FontSize="12" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="0,0,18,0" Click="StartupChanged" WindowChrome.IsHitTestVisibleInChrome="True" />
+      <Button x:Name="SettingsButton" Grid.Column="1" Style="{StaticResource CaptionButton}" Click="ShowSettings" ToolTip="Settings" WindowChrome.IsHitTestVisibleInChrome="True" VerticalAlignment="Top">
+        <TextBlock Style="{StaticResource Icon}" FontSize="13" Text="&#xE713;" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+      </Button>
       <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Top" WindowChrome.IsHitTestVisibleInChrome="True">
         <Button Style="{StaticResource CaptionButton}" Click="MinimizeClicked" ToolTip="Minimize"><TextBlock Style="{StaticResource Icon}" FontSize="10" Text="&#xE921;" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" /></Button>
         <Button Style="{StaticResource CaptionButton}" Click="MaximizeClicked" ToolTip="Maximize"><TextBlock x:Name="MaximizeGlyph" Style="{StaticResource Icon}" FontSize="10" Text="&#xE922;" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" /></Button>
@@ -61,411 +76,229 @@
       </StackPanel>
     </Grid>
 
+    <!-- Settings flyout -->
+    <Popup x:Name="SettingsPopup" PlacementTarget="{Binding ElementName=SettingsButton}" Placement="Bottom" HorizontalOffset="-180" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
+      <Border Background="#F21C1B22" BorderBrush="{StaticResource StrongBorderBrush}" BorderThickness="1" CornerRadius="10" Padding="16,14" Width="240" Margin="0,4,0,0">
+        <Grid>
+          <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+          <TextBlock Text="Launch at startup" FontSize="13" VerticalAlignment="Center" />
+          <CheckBox x:Name="StartupCheckBox" Grid.Column="1" Click="StartupChanged" VerticalAlignment="Center" />
+        </Grid>
+      </Border>
+    </Popup>
+
     <!-- Workspace -->
-    <Grid Grid.Row="1" Margin="14,4,14,0">
+    <Grid Grid.Row="1" Margin="10,0,12,12">
       <Grid.ColumnDefinitions>
-        <ColumnDefinition Width="260" />
-        <ColumnDefinition Width="12" />
-        <ColumnDefinition Width="300" />
-        <ColumnDefinition Width="12" />
+        <ColumnDefinition Width="250" />
+        <ColumnDefinition Width="10" />
         <ColumnDefinition />
       </Grid.ColumnDefinitions>
 
-      <!-- Profiles -->
-      <Border Grid.Column="0" Style="{StaticResource Card}">
-        <Grid>
-          <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-          <Grid Margin="18,16,16,10">
-            <TextBlock Text="Profiles" FontSize="14" FontWeight="SemiBold" />
-            <Border Style="{StaticResource ValueChip}"><TextBlock Text="{Binding Profiles.Count}" FontSize="11" Foreground="{StaticResource MutedBrush}" /></Border>
-          </Grid>
-          <ListBox x:Name="ProfilesList" Grid.Row="1" Padding="8,0,8,8" ItemsSource="{Binding Profiles}" SelectedItem="{Binding SelectedProfile}" SelectionChanged="ProfileSelected">
-            <ListBox.ItemTemplate>
-              <DataTemplate>
-                <Grid>
-                  <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                  <Grid Width="32" Height="32" Margin="0,0,12,0">
-                    <Grid Style="{StaticResource LetterTile}">
-                      <Border CornerRadius="8" Background="{Binding TintHex}" />
-                      <Border CornerRadius="8" Background="{StaticResource SheenBrush}" BorderBrush="#30FFFFFF" BorderThickness="1" />
-                      <TextBlock Text="{Binding Initial}" FontSize="13" FontWeight="SemiBold" Foreground="#E6FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                    </Grid>
-                    <Image Source="{Binding Icon}" Width="28" Height="28" Style="{StaticResource AppIcon}" />
-                  </Grid>
-                  <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                    <TextBlock Text="{Binding DisplayName}" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                    <TextBlock FontSize="12" Foreground="{StaticResource MutedBrush}" Margin="0,2,0,0" TextTrimming="CharacterEllipsis">
-                      <Run Text="{Binding ProcessName, StringFormat={}{0}.exe, Mode=OneWay}" /><Run Text=" · " Foreground="{StaticResource SubtleBrush}" /><Run Text="{Binding ModeLabel, Mode=OneWay}" Foreground="{StaticResource SubtleBrush}" />
-                    </TextBlock>
-                  </StackPanel>
-                  <Ellipse Grid.Column="2" Width="7" Height="7" VerticalAlignment="Center" Margin="10,0,2,0">
-                    <Ellipse.Style>
-                      <Style TargetType="Ellipse">
-                        <Setter Property="Fill" Value="#40FFFFFF" />
-                        <Setter Property="ToolTip" Value="Disabled" />
-                        <Style.Triggers>
-                          <DataTrigger Binding="{Binding Enabled}" Value="True">
-                            <Setter Property="Fill" Value="{StaticResource SuccessBrush}" />
-                            <Setter Property="ToolTip" Value="Enabled" />
-                          </DataTrigger>
-                        </Style.Triggers>
-                      </Style>
-                    </Ellipse.Style>
-                  </Ellipse>
-                </Grid>
-              </DataTemplate>
-            </ListBox.ItemTemplate>
-          </ListBox>
-          <StackPanel Grid.Row="1" VerticalAlignment="Center" HorizontalAlignment="Center" Margin="24">
-            <StackPanel.Style>
-              <Style TargetType="StackPanel">
-                <Setter Property="Visibility" Value="Collapsed" />
-                <Style.Triggers><DataTrigger Binding="{Binding Profiles.Count}" Value="0"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
-              </Style>
-            </StackPanel.Style>
-            <TextBlock Style="{StaticResource Icon}" Text="&#xE71D;" FontSize="22" Foreground="{StaticResource SubtleBrush}" />
-            <TextBlock Text="No profiles yet" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,10,0,4" />
-            <TextBlock Text="Add an app from Running apps to get started." Foreground="{StaticResource MutedBrush}" FontSize="12" TextWrapping="Wrap" TextAlignment="Center" />
-          </StackPanel>
+      <!-- Apps: the profiles, one row per app -->
+      <Grid Grid.Column="0">
+        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+        <Grid Margin="10,6,4,8">
+          <TextBlock Text="Apps" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource SubtleBrush}" VerticalAlignment="Center" />
+          <Button x:Name="AddAppButton" Style="{StaticResource GhostButton}" HorizontalAlignment="Right" Padding="8,4" Click="ShowAddApp" ToolTip="Add an app">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Style="{StaticResource Icon}" Text="&#xE710;" FontSize="11" Margin="0,0,6,0" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+              <TextBlock Text="Add" FontSize="12" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+            </StackPanel>
+          </Button>
         </Grid>
-      </Border>
+        <ListBox x:Name="ProfilesList" Grid.Row="1" Padding="0" ItemsSource="{Binding Profiles}" SelectedItem="{Binding SelectedProfile}" SelectionChanged="ProfileSelected">
+          <ListBox.ItemTemplate>
+            <DataTemplate>
+              <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                <Grid Width="22" Height="22" Margin="0,0,12,0">
+                  <Border Style="{StaticResource LetterTile}"><TextBlock Text="{Binding Initial}" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" /></Border>
+                  <Image Source="{Binding Icon}" Width="22" Height="22" Style="{StaticResource AppIcon}" />
+                </Grid>
+                <TextBlock Grid.Column="1" Text="{Binding DisplayName}" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                <CheckBox Grid.Column="2" IsChecked="{Binding Enabled}" VerticalAlignment="Center" Margin="8,0,0,0" ToolTip="Glass on or off" />
+              </Grid>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+        <StackPanel Grid.Row="1" VerticalAlignment="Center" HorizontalAlignment="Center" Margin="20">
+          <StackPanel.Style>
+            <Style TargetType="StackPanel">
+              <Setter Property="Visibility" Value="Collapsed" />
+              <Style.Triggers><DataTrigger Binding="{Binding Profiles.Count}" Value="0"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
+            </Style>
+          </StackPanel.Style>
+          <TextBlock Text="No apps yet" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,0,0,4" />
+          <TextBlock Text="Use Add to give an app glass." Foreground="{StaticResource SubtleBrush}" FontSize="12" TextAlignment="Center" />
+        </StackPanel>
+      </Grid>
 
-      <!-- Running applications -->
-      <Border Grid.Column="2" Style="{StaticResource Card}">
-        <Grid>
-          <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-          <Grid Margin="18,16,16,10">
-            <TextBlock Text="Running apps" FontSize="14" FontWeight="SemiBold" />
-            <Border Style="{StaticResource ValueChip}"><TextBlock Text="{Binding RunningApps.Count}" FontSize="11" Foreground="{StaticResource MutedBrush}" /></Border>
-          </Grid>
-          <Grid Grid.Row="1" Margin="12,0,12,10">
-            <TextBox x:Name="AppSearchBox" Tag="Search apps" Padding="28,7,8,7" TextChanged="AppSearchChanged" ToolTip="Filter by application or process name" />
-            <TextBlock Style="{StaticResource Icon}" Text="&#xE721;" HorizontalAlignment="Left" Margin="12,0,0,0" Foreground="{StaticResource SubtleBrush}" IsHitTestVisible="False" />
-          </Grid>
-          <ListBox Grid.Row="2" Padding="8,0,8,8" ItemsSource="{Binding RunningApps}" ItemContainerStyle="{StaticResource StaticListItem}">
-            <ListBox.ItemTemplate>
-              <DataTemplate>
-                <Grid>
-                  <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                  <Grid Width="24" Height="24" Margin="0,0,10,0" VerticalAlignment="Center">
-                    <Border Style="{StaticResource LetterTileBorder}" CornerRadius="6" Background="{StaticResource RaisedBrush}">
-                      <TextBlock Text="{Binding Initial}" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                    </Border>
-                    <Image Source="{Binding Icon}" Width="24" Height="24" Style="{StaticResource AppIcon}" />
-                  </Grid>
-                  <StackPanel Grid.Column="1" Margin="0,0,10,0" VerticalAlignment="Center">
-                    <TextBlock Text="{Binding DisplayName}" FontSize="13" TextTrimming="CharacterEllipsis" ToolTip="{Binding DisplayName}" />
-                    <TextBlock Text="{Binding ProcessName, StringFormat={}{0}.exe}" FontSize="12" Foreground="{StaticResource MutedBrush}" Margin="0,2,0,0" TextTrimming="CharacterEllipsis" />
-                  </StackPanel>
-                  <Button Grid.Column="2" Style="{StaticResource AddButton}" Click="AddRunningAppCard" VerticalAlignment="Center" ToolTip="Create a glass profile for this app">
-                    <StackPanel Orientation="Horizontal">
-                      <TextBlock Style="{StaticResource Icon}" Text="&#xE710;" FontSize="10" Margin="0,0,6,0" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
-                      <TextBlock Text="Add" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
-                    </StackPanel>
+      <!-- Add-app picker: running apps that don't have glass yet -->
+      <Popup x:Name="AddAppPopup" PlacementTarget="{Binding ElementName=AddAppButton}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade" Opened="AddAppOpened">
+        <Border Background="#F21C1B22" BorderBrush="{StaticResource StrongBorderBrush}" BorderThickness="1" CornerRadius="10" Padding="8" Width="300" Margin="0,4,0,0">
+          <StackPanel>
+            <Grid Margin="0,0,0,6">
+              <TextBox x:Name="AppSearchBox" Tag="Search running apps" Padding="28,7,8,7" TextChanged="AppSearchChanged" />
+              <TextBlock Style="{StaticResource Icon}" Text="&#xE721;" HorizontalAlignment="Left" Margin="11,0,0,0" Foreground="{StaticResource SubtleBrush}" IsHitTestVisible="False" />
+            </Grid>
+            <ListBox ItemsSource="{Binding RunningApps}" MaxHeight="360" Padding="0">
+              <ListBox.ItemTemplate>
+                <DataTemplate>
+                  <Button Click="AddRunningApp" ToolTip="{Binding WindowTitle}" HorizontalContentAlignment="Stretch">
+                    <Button.Template>
+                      <ControlTemplate TargetType="Button"><Border Background="Transparent"><ContentPresenter /></Border></ControlTemplate>
+                    </Button.Template>
+                    <Grid>
+                      <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition /></Grid.ColumnDefinitions>
+                      <Grid Width="20" Height="20" Margin="0,0,10,0">
+                        <Border Style="{StaticResource LetterTile}"><TextBlock Text="{Binding Initial}" FontSize="10" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" /></Border>
+                        <Image Source="{Binding Icon}" Width="20" Height="20" Style="{StaticResource AppIcon}" />
+                      </Grid>
+                      <TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    </Grid>
                   </Button>
-                </Grid>
-              </DataTemplate>
-            </ListBox.ItemTemplate>
-          </ListBox>
-        </Grid>
-      </Border>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+            <TextBlock x:Name="NoRunningAppsText" Text="Every open app already has glass." FontSize="12" Foreground="{StaticResource SubtleBrush}" Margin="8,6" Visibility="Collapsed" />
+          </StackPanel>
+        </Border>
+      </Popup>
 
       <!-- Editor -->
-      <Border Grid.Column="4" Style="{StaticResource Card}">
+      <Border Grid.Column="2" Style="{StaticResource Card}">
         <Grid>
-          <!-- Empty state -->
-          <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-            <StackPanel.Style>
-              <Style TargetType="StackPanel">
+          <TextBlock Text="Pick an app on the left." Foreground="{StaticResource SubtleBrush}" HorizontalAlignment="Center" VerticalAlignment="Center">
+            <TextBlock.Style>
+              <Style TargetType="TextBlock">
                 <Setter Property="Visibility" Value="Collapsed" />
                 <Style.Triggers><DataTrigger Binding="{Binding SelectedProfile}" Value="{x:Null}"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
               </Style>
-            </StackPanel.Style>
-            <TextBlock Style="{StaticResource Icon}" Text="&#xE790;" FontSize="28" Foreground="{StaticResource SubtleBrush}" />
-            <TextBlock Text="Select a profile" FontSize="15" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,12,0,4" />
-            <TextBlock Text="Pick a profile on the left to tune its glass." Foreground="{StaticResource MutedBrush}" HorizontalAlignment="Center" />
-          </StackPanel>
+            </TextBlock.Style>
+          </TextBlock>
 
-          <Grid DataContext="{Binding SelectedProfile}">
-            <Grid.Style>
-              <Style TargetType="Grid">
+          <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,6,0" DataContext="{Binding SelectedProfile}">
+            <ScrollViewer.Style>
+              <Style TargetType="ScrollViewer">
                 <Style.Triggers><DataTrigger Binding="{Binding}" Value="{x:Null}"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger></Style.Triggers>
               </Style>
-            </Grid.Style>
-            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+            </ScrollViewer.Style>
+            <StackPanel Margin="28,24,22,28">
 
-            <!-- Editor header -->
-            <Border BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Padding="26,20,26,18">
+              <!-- Header -->
               <Grid>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                <Grid Width="44" Height="44" Margin="0,0,14,0">
-                  <Grid Style="{StaticResource LetterTile}">
-                    <Border CornerRadius="11" Background="{Binding TintHex}" />
-                    <Border CornerRadius="11" Background="{StaticResource SheenBrush}" BorderBrush="#30FFFFFF" BorderThickness="1" />
-                    <TextBlock Text="{Binding Initial}" FontSize="18" FontWeight="SemiBold" Foreground="#E6FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                  </Grid>
-                  <Image Source="{Binding Icon}" Width="40" Height="40" Style="{StaticResource AppIcon}" />
+                <Grid Width="32" Height="32" Margin="0,0,14,0">
+                  <Border Style="{StaticResource LetterTile}" CornerRadius="8"><TextBlock Text="{Binding Initial}" FontSize="15" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" /></Border>
+                  <Image Source="{Binding Icon}" Width="32" Height="32" Style="{StaticResource AppIcon}" />
                 </Grid>
-                <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                  <TextBlock Text="{Binding DisplayName}" FontSize="18" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                  <TextBlock Text="{Binding ProcessName, StringFormat={}{0}.exe}" FontSize="12" Foreground="{StaticResource MutedBrush}" Margin="0,2,0,0" />
-                </StackPanel>
-                <CheckBox Grid.Column="2" Content="Enabled" IsChecked="{Binding Enabled}" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="20,0,0,0" />
+                <TextBlock Grid.Column="1" Text="{Binding DisplayName}" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                <CheckBox Grid.Column="2" IsChecked="{Binding Enabled}" VerticalAlignment="Center" ToolTip="Glass on or off" />
               </Grid>
-            </Border>
 
-            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="0,0,6,0">
-              <StackPanel Margin="26,20,20,24">
-
-                <TextBlock Text="IDENTITY" Style="{StaticResource SectionLabel}" />
-                <Grid Margin="0,12,0,0">
-                  <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="12" /><ColumnDefinition /></Grid.ColumnDefinitions>
-                  <StackPanel><TextBlock Text="Display name" Style="{StaticResource FieldLabel}" /><TextBox Text="{Binding DisplayName, UpdateSourceTrigger=PropertyChanged}" /></StackPanel>
-                  <StackPanel Grid.Column="2"><TextBlock Text="Process name" Style="{StaticResource FieldLabel}" /><TextBox Text="{Binding ProcessName, UpdateSourceTrigger=PropertyChanged}" Tag="e.g. olk" /></StackPanel>
-                </Grid>
-
-                <TextBlock Text="MODE" Style="{StaticResource SectionLabel}" Margin="0,30,0,0" />
-                <Border Style="{StaticResource SegmentGroup}" Margin="0,12,0,0" HorizontalAlignment="Left">
-                  <StackPanel Orientation="Horizontal">
-                    <RadioButton Style="{StaticResource Segment}" GroupName="Mode" Content="Glass host" IsChecked="{Binding Mode, Converter={StaticResource EnumMatch}, ConverterParameter=Host}" />
-                    <RadioButton Style="{StaticResource Segment}" GroupName="Mode" Content="Native backdrop" Click="NativeModeChosen" IsChecked="{Binding Mode, Converter={StaticResource EnumMatch}, ConverterParameter=Native}" />
-                  </StackPanel>
-                </Border>
-                <StackPanel Style="{StaticResource HostOnly}">
-                  <TextBlock Text="Works with any app. GlassForge tracks the window with its own acrylic layer and makes the app translucent on top of it." FontSize="12" Foreground="{StaticResource SubtleBrush}" TextWrapping="Wrap" Margin="0,8,0,0" />
+              <!-- Mode -->
+              <Border Style="{StaticResource SegmentGroup}" Margin="0,26,0,0" HorizontalAlignment="Left">
+                <StackPanel Orientation="Horizontal">
+                  <RadioButton Style="{StaticResource Segment}" GroupName="Mode" Content="Native" Click="NativeModeChosen" IsChecked="{Binding Mode, Converter={StaticResource EnumMatch}, ConverterParameter=Native}" />
+                  <RadioButton Style="{StaticResource Segment}" GroupName="Mode" Content="Overlay" IsChecked="{Binding Mode, Converter={StaticResource EnumMatch}, ConverterParameter=Host}" />
                 </StackPanel>
-                <StackPanel Style="{StaticResource NativeOnly}">
-                  <TextBlock Text="Windows draws the material on the app's own frame: sharpest look, zero overhead, nothing to flicker. Apps that paint their own background (Chrome, Electron, games) only get it in the title bar; use Glass host for those." FontSize="12" Foreground="{StaticResource SubtleBrush}" TextWrapping="Wrap" Margin="0,8,0,0" />
-                  <TextBlock x:Name="NativeUnsupportedText" Text="Native backdrops need Windows 11 22H2 or newer; only the window options below will apply." FontSize="12" Foreground="{StaticResource DangerBrush}" TextWrapping="Wrap" Margin="0,6,0,0" Visibility="Collapsed" />
-                </StackPanel>
+              </Border>
+              <StackPanel Style="{StaticResource NativeOnly}">
+                <TextBlock Text="Windows draws live acrylic on the app's own frame. Sharpest, no overhead." Style="{StaticResource OptionHint}" Margin="0,8,0,0" />
+                <TextBlock x:Name="NativeUnsupportedText" Text="Needs Windows 11 22H2 or newer." FontSize="12" Foreground="{StaticResource DangerBrush}" Margin="0,4,0,0" Visibility="Collapsed" />
+              </StackPanel>
+              <StackPanel Style="{StaticResource HostOnly}">
+                <TextBlock Text="A glass layer behind a see-through app. Works with any app." Style="{StaticResource OptionHint}" Margin="0,8,0,0" />
+              </StackPanel>
 
-                <Grid Margin="0,30,0,0">
-                  <TextBlock Text="MATERIAL" Style="{StaticResource SectionLabel}" VerticalAlignment="Center" />
-                  <Button Style="{StaticResource GhostButton}" HorizontalAlignment="Right" Padding="8,3" FontSize="12" Click="ResetAppearance" ToolTip="Restore the neutral GlassForge defaults">
-                    <StackPanel Orientation="Horizontal">
-                      <TextBlock Style="{StaticResource Icon}" Text="&#xE777;" FontSize="11" Margin="0,0,6,0" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
-                      <TextBlock Text="Reset to default" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
-                    </StackPanel>
-                  </Button>
-                </Grid>
-                <StackPanel Style="{StaticResource NativeOnly}">
-                  <TextBlock Text="Acrylic: a live blur of whatever is behind the window, animated wallpapers included." FontSize="12" Foreground="{StaticResource SubtleBrush}" TextWrapping="Wrap" Margin="0,12,0,0" />
-                  <Grid Margin="0,16,0,0">
-                    <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                    <StackPanel><TextBlock Text="Extend into the whole window" FontSize="13" /><TextBlock Text="Full-window glass for apps that leave their background clear, like Notepad and Windows Terminal. Apps that paint their own background (File Explorer's file list, Outlook, Chrome) stay solid there." FontSize="12" Foreground="{StaticResource SubtleBrush}" TextWrapping="Wrap" Margin="0,2,12,0" /></StackPanel>
-                    <CheckBox Grid.Column="1" IsChecked="{Binding ExtendIntoClient}" VerticalAlignment="Center" />
-                  </Grid>
-                  <!-- Notepad only: HDR turns the see-through text area's text invisible -->
-                  <Grid Margin="0,16,0,0">
-                    <Grid.Style>
-                      <Style TargetType="Grid">
-                        <Setter Property="Visibility" Value="Collapsed" />
-                        <Style.Triggers><DataTrigger Binding="{Binding IsNotepad}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
-                      </Style>
-                    </Grid.Style>
-                    <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                    <StackPanel><TextBlock Text="Solid text area (for HDR)" FontSize="13" /><TextBlock Text="Turn this on if HDR is on and the text you type is invisible. The tabs, menu and status bar stay glass; the page you type on stays solid." FontSize="12" Foreground="{StaticResource SubtleBrush}" TextWrapping="Wrap" Margin="0,2,12,0" /></StackPanel>
-                    <CheckBox Grid.Column="1" IsChecked="{Binding SolidTextArea}" VerticalAlignment="Center" />
-                  </Grid>
-                  <Grid Margin="0,16,0,0">
-                    <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                    <StackPanel><TextBlock Text="Keep glass when unfocused" FontSize="13" /><TextBlock Text="Windows normally swaps the material for a flat color when you click away. This keeps the frame drawn as active, so the glass stays live." FontSize="12" Foreground="{StaticResource SubtleBrush}" TextWrapping="Wrap" Margin="0,2,12,0" /></StackPanel>
-                    <CheckBox Grid.Column="1" IsChecked="{Binding KeepGlassWhenUnfocused}" VerticalAlignment="Center" />
-                  </Grid>
-                  <!-- File Explorer only: the one option that injects code -->
-                  <StackPanel Margin="0,16,0,0">
-                    <StackPanel.Style>
-                      <Style TargetType="StackPanel">
-                        <Setter Property="Visibility" Value="Collapsed" />
-                        <Style.Triggers><DataTrigger Binding="{Binding IsExplorer}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
-                      </Style>
-                    </StackPanel.Style>
-                    <Grid>
-                      <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                      <StackPanel>
-                        <StackPanel Orientation="Horizontal">
-                          <TextBlock Text="Full File Explorer glass" FontSize="13" />
-                          <Border Background="#33F87171" CornerRadius="4" Padding="6,1" Margin="8,0,0,0" VerticalAlignment="Center"><TextBlock Text="EXPERIMENTAL" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource DangerBrush}" /></Border>
-                        </StackPanel>
-                        <TextBlock Text="Glass behind the file list, navigation pane, Home, Gallery, scrollbars and toolbar, not just the title bar. Uses Explorer's dark theme." FontSize="12" Foreground="{StaticResource SubtleBrush}" TextWrapping="Wrap" Margin="0,2,12,0" />
-                      </StackPanel>
-                      <CheckBox Grid.Column="1" IsChecked="{Binding HookGlass}" VerticalAlignment="Center" />
-                    </Grid>
-                    <Border BorderBrush="{StaticResource DangerBrush}" BorderThickness="1" Background="#1AF87171" CornerRadius="8" Padding="12,10" Margin="0,10,0,0">
-                      <StackPanel>
-                        <StackPanel Orientation="Horizontal">
-                          <TextBlock Style="{StaticResource Icon}" Text="&#xE7BA;" Foreground="{StaticResource DangerBrush}" Margin="0,0,8,0" VerticalAlignment="Center" />
-                          <TextBlock Text="Warning: this injects code into File Explorer" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource DangerBrush}" VerticalAlignment="Center" />
-                        </StackPanel>
-                        <TextBlock FontSize="12" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,0"
-                                   Text="Unlike everything else in GlassForge, this loads a GlassForge DLL into explorer.exe to redraw its windows. Explorer also runs your taskbar and desktop, so a bug here can crash or freeze them (Windows restarts Explorer automatically). Antivirus may flag it, it can break after Windows updates, and it can conflict with Windhawk, StartAllBack or other Explorer mods. Turning it off restores open windows; a leftover copy of the DLL stays loaded but inactive until Explorer restarts or you sign out." />
-                        <TextBlock x:Name="ExplorerHookMissingText" FontSize="12" Foreground="{StaticResource DangerBrush}" TextWrapping="Wrap" Margin="0,6,0,0" Visibility="Collapsed"
-                                   Text="This build of GlassForge doesn't include the Explorer hook (it needs the 64-bit build with the native component)." />
-                      </StackPanel>
-                    </Border>
-                  </StackPanel>
-                  <!-- Settings (UWP) only: the same hook, swapping the app's own Mica for live glass -->
-                  <StackPanel Margin="0,16,0,0">
-                    <StackPanel.Style>
-                      <Style TargetType="StackPanel">
-                        <Setter Property="Visibility" Value="Collapsed" />
-                        <Style.Triggers><DataTrigger Binding="{Binding IsSettings}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
-                      </Style>
-                    </StackPanel.Style>
-                    <Grid>
-                      <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                      <StackPanel>
-                        <StackPanel Orientation="Horizontal">
-                          <TextBlock Text="Glass background" FontSize="13" />
-                          <Border Background="#33F87171" CornerRadius="4" Padding="6,1" Margin="8,0,0,0" VerticalAlignment="Center"><TextBlock Text="EXPERIMENTAL" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource DangerBrush}" /></Border>
-                        </StackPanel>
-                        <TextBlock Text="Settings paints its own Mica (the static wallpaper), which covers any backdrop. This swaps it for a live blur of what's behind the window, animated wallpapers included, and keeps it when Settings isn't focused." FontSize="12" Foreground="{StaticResource SubtleBrush}" TextWrapping="Wrap" Margin="0,2,12,0" />
-                      </StackPanel>
-                      <CheckBox Grid.Column="1" IsChecked="{Binding HookGlass}" VerticalAlignment="Center" />
-                    </Grid>
-                    <Border BorderBrush="{StaticResource DangerBrush}" BorderThickness="1" Background="#1AF87171" CornerRadius="8" Padding="12,10" Margin="0,10,0,0">
-                      <StackPanel>
-                        <StackPanel Orientation="Horizontal">
-                          <TextBlock Style="{StaticResource Icon}" Text="&#xE7BA;" Foreground="{StaticResource DangerBrush}" Margin="0,0,8,0" VerticalAlignment="Center" />
-                          <TextBlock Text="Warning: this injects code into Settings" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource DangerBrush}" VerticalAlignment="Center" />
-                        </StackPanel>
-                        <TextBlock FontSize="12" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,0"
-                                   Text="This loads a GlassForge DLL into SystemSettings.exe and redirects how Settings sets its background. If it ever crashes, only Settings closes. Antivirus may flag it, and Windows updates can break it. Turning it off gives Settings its Mica back; an inactive copy of the DLL stays loaded until Settings is closed." />
-                      </StackPanel>
-                    </Border>
-                  </StackPanel>
-                  <!-- Office (Word, Excel, PowerPoint): the same hook, swapping Office's own Mica for live glass -->
-                  <StackPanel Margin="0,16,0,0">
-                    <StackPanel.Style>
-                      <Style TargetType="StackPanel">
-                        <Setter Property="Visibility" Value="Collapsed" />
-                        <Style.Triggers><DataTrigger Binding="{Binding IsOffice}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
-                      </Style>
-                    </StackPanel.Style>
-                    <Grid>
-                      <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                      <StackPanel>
-                        <StackPanel Orientation="Horizontal">
-                          <TextBlock Text="Glass background" FontSize="13" />
-                          <Border Background="#33F87171" CornerRadius="4" Padding="6,1" Margin="8,0,0,0" VerticalAlignment="Center"><TextBlock Text="EXPERIMENTAL" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource DangerBrush}" /></Border>
-                        </StackPanel>
-                        <TextBlock FontSize="12" Foreground="{StaticResource SubtleBrush}" TextWrapping="Wrap" Margin="0,2,12,0">
-                          <Run Text="{Binding OfficeDisplayName, Mode=OneWay}" /><Run Text=" paints its own Mica (the static wallpaper) behind its window. This swaps it for a live blur of what's behind the window, animated wallpapers included, and keeps it when the app isn't focused. Native backdrop does nothing without this. Close and reopen " /><Run Text="{Binding OfficeDisplayName, Mode=OneWay}" /><Run Text=" after turning it on or off." />
-                        </TextBlock>
-                      </StackPanel>
-                      <CheckBox Grid.Column="1" IsChecked="{Binding HookGlass}" VerticalAlignment="Center" />
-                    </Grid>
-                    <Border BorderBrush="{StaticResource DangerBrush}" BorderThickness="1" Background="#1AF87171" CornerRadius="8" Padding="12,10" Margin="0,10,0,0">
-                      <StackPanel>
-                        <StackPanel Orientation="Horizontal">
-                          <TextBlock Style="{StaticResource Icon}" Text="&#xE7BA;" Foreground="{StaticResource DangerBrush}" Margin="0,0,8,0" VerticalAlignment="Center" />
-                          <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource DangerBrush}" VerticalAlignment="Center">
-                            <Run Text="Warning: this injects code into " /><Run Text="{Binding OfficeDisplayName, Mode=OneWay}" />
-                          </TextBlock>
-                        </StackPanel>
-                        <TextBlock FontSize="12" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,0">
-                          <Run Text="This loads a GlassForge DLL into " /><Run Text="{Binding OfficeExeName, Mode=OneWay}" /><Run Text=" and changes how it draws its background. All " /><Run Text="{Binding OfficeDisplayName, Mode=OneWay}" /><Run Text=" windows share one process: if it ever crashes, every open document closes with it, and unsaved work can be lost. Antivirus may flag it, and updates can break it. After turning it off, close and reopen " /><Run Text="{Binding OfficeDisplayName, Mode=OneWay}" /><Run Text=" to get its own background back; an inactive copy of the DLL stays loaded until then." />
-                        </TextBlock>
-                      </StackPanel>
-                    </Border>
-                    <TextBlock FontSize="12" Foreground="{StaticResource SubtleBrush}" TextWrapping="Wrap" Margin="0,10,0,0">
-                      <Run Text="Known issue: because the glass is kept while the window is unfocused, the first click on a " /><Run Text="{Binding OfficeDisplayName, Mode=OneWay}" /><Run Text=" window can be spent re-activating it, so the title bar may take two clicks to drag." />
-                    </TextBlock>
-                  </StackPanel>
-                  <!-- Windows Terminal only: the same hook, frame only -->
-                  <StackPanel Margin="0,16,0,0">
-                    <StackPanel.Style>
-                      <Style TargetType="StackPanel">
-                        <Setter Property="Visibility" Value="Collapsed" />
-                        <Style.Triggers><DataTrigger Binding="{Binding IsTerminal}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
-                      </Style>
-                    </StackPanel.Style>
-                    <Grid>
-                      <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                      <StackPanel>
-                        <StackPanel Orientation="Horizontal">
-                          <TextBlock Text="Glass tab row" FontSize="13" />
-                          <Border Background="#33F87171" CornerRadius="4" Padding="6,1" Margin="8,0,0,0" VerticalAlignment="Center"><TextBlock Text="EXPERIMENTAL" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource DangerBrush}" /></Border>
-                        </StackPanel>
-                        <TextBlock Text="Live Acrylic behind the tab row and border only; the terminal itself keeps Terminal's own background. Stops Terminal resetting its backdrop on focus changes, so nothing flashes. Needs a Terminal theme with a transparent tab row (tabRow background #00000000)." FontSize="12" Foreground="{StaticResource SubtleBrush}" TextWrapping="Wrap" Margin="0,2,12,0" />
-                      </StackPanel>
-                      <CheckBox Grid.Column="1" IsChecked="{Binding HookGlass}" VerticalAlignment="Center" />
-                    </Grid>
-                    <Border BorderBrush="{StaticResource DangerBrush}" BorderThickness="1" Background="#1AF87171" CornerRadius="8" Padding="12,10" Margin="0,10,0,0">
-                      <StackPanel>
-                        <StackPanel Orientation="Horizontal">
-                          <TextBlock Style="{StaticResource Icon}" Text="&#xE7BA;" Foreground="{StaticResource DangerBrush}" Margin="0,0,8,0" VerticalAlignment="Center" />
-                          <TextBlock Text="Warning: this injects code into Windows Terminal" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource DangerBrush}" VerticalAlignment="Center" />
-                        </StackPanel>
-                        <TextBlock FontSize="12" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,0"
-                                   Text="This loads a GlassForge DLL into WindowsTerminal.exe. It only changes how the window frame is drawn, but all Terminal windows share one process: if it ever crashes, every open tab closes with it, including running programs. Antivirus may flag it, and Terminal updates can break it. Turning it off restores open windows and unloads the DLL." />
-                      </StackPanel>
-                    </Border>
-                  </StackPanel>
-                </StackPanel>
+              <Border Style="{StaticResource Divider}" />
 
-                <StackPanel Style="{StaticResource HostOnly}">
-                <Grid Margin="0,12,0,0">
-                  <StackPanel><TextBlock Text="Foreground opacity" FontSize="13" /><TextBlock Text="How solid the app's own content stays" FontSize="12" Foreground="{StaticResource SubtleBrush}" Margin="0,2,0,0" /></StackPanel>
-                  <Border Style="{StaticResource ValueChip}"><TextBlock Text="{Binding OpacityLabel}" FontSize="12" /></Border>
-                </Grid>
-                <Slider Minimum="100" Maximum="255" Value="{Binding WindowOpacity, UpdateSourceTrigger=PropertyChanged}" Margin="0,6,0,0" />
-                <Grid Margin="0,16,0,0">
-                  <StackPanel><TextBlock Text="Glass color strength" FontSize="13" /><TextBlock Text="How strongly the tint colors the backdrop" FontSize="12" Foreground="{StaticResource SubtleBrush}" Margin="0,2,0,0" /></StackPanel>
-                  <Border Style="{StaticResource ValueChip}"><TextBlock Text="{Binding TintLabel}" FontSize="12" /></Border>
-                </Grid>
-                <Slider Minimum="0" Maximum="255" Value="{Binding TintOpacity, UpdateSourceTrigger=PropertyChanged}" Margin="0,6,0,0" />
-
-                <TextBlock Text="TINT" Style="{StaticResource SectionLabel}" Margin="0,30,0,0" />
-                <Grid Margin="0,12,0,0">
-                  <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition /></Grid.ColumnDefinitions>
-                  <Grid Width="76" Height="76" Margin="0,0,18,0" VerticalAlignment="Top">
-                    <Border x:Name="ColorPreview" CornerRadius="12" />
-                    <Border CornerRadius="12" Background="{StaticResource SheenBrush}" BorderBrush="#40FFFFFF" BorderThickness="1" />
-                  </Grid>
-                  <StackPanel Grid.Column="1">
-                    <WrapPanel Margin="-4,-4,0,8">
-                      <Button Style="{StaticResource SwatchButton}" Background="#181818" Tag="181818" ToolTip="Neutral" Click="SetTintPreset" />
-                      <Button Style="{StaticResource SwatchButton}" Background="#19324A" Tag="19324A" ToolTip="Ocean" Click="SetTintPreset" />
-                      <Button Style="{StaticResource SwatchButton}" Background="#0F594F" Tag="0F594F" ToolTip="Emerald" Click="SetTintPreset" />
-                      <Button Style="{StaticResource SwatchButton}" Background="#7200B8" Tag="7200B8" ToolTip="Violet" Click="SetTintPreset" />
-                      <Button Style="{StaticResource SwatchButton}" Background="#A2175B" Tag="A2175B" ToolTip="Rose" Click="SetTintPreset" />
-                      <Button Style="{StaticResource SwatchButton}" Background="#6B351A" Tag="6B351A" ToolTip="Amber" Click="SetTintPreset" />
-                    </WrapPanel>
-                    <Grid>
-                      <Grid.ColumnDefinitions><ColumnDefinition MaxWidth="160" /><ColumnDefinition Width="8" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                      <TextBox x:Name="TintHexBox" Text="{Binding TintColor, UpdateSourceTrigger=PropertyChanged}" TextChanged="TintHexChanged" MaxLength="7" Padding="20,7,8,7" FontFamily="Cascadia Mono, Consolas" Tag="181818" />
-                      <TextBlock Text="#" Foreground="{StaticResource SubtleBrush}" FontFamily="Cascadia Mono, Consolas" VerticalAlignment="Center" Margin="11,0,0,0" IsHitTestVisible="False" />
-                      <Button Grid.Column="2" Click="ChooseTintColor">
-                        <StackPanel Orientation="Horizontal">
-                          <TextBlock Style="{StaticResource Icon}" Text="&#xE790;" Margin="0,0,7,0" />
-                          <TextBlock Text="Custom…" />
-                        </StackPanel>
-                      </Button>
-                    </Grid>
-                  </StackPanel>
-                </Grid>
-
-                <Grid Margin="0,18,0,0">
-                  <Grid.ColumnDefinitions><ColumnDefinition Width="22" /><ColumnDefinition /><ColumnDefinition Width="40" /></Grid.ColumnDefinitions>
-                  <Grid.RowDefinitions><RowDefinition /><RowDefinition /><RowDefinition /></Grid.RowDefinitions>
-                  <TextBlock Text="R" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource SubtleBrush}" VerticalAlignment="Center" />
-                  <Slider x:Name="RedSlider" Grid.Column="1" Minimum="0" Maximum="255" Foreground="#F87171" ValueChanged="TintChannelChanged" />
-                  <TextBlock x:Name="RedValue" Grid.Column="2" FontSize="12" Foreground="{StaticResource MutedBrush}" FontFamily="Cascadia Mono, Consolas" HorizontalAlignment="Right" VerticalAlignment="Center" />
-                  <TextBlock Grid.Row="1" Text="G" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource SubtleBrush}" VerticalAlignment="Center" />
-                  <Slider x:Name="GreenSlider" Grid.Row="1" Grid.Column="1" Minimum="0" Maximum="255" Foreground="#4ADE80" ValueChanged="TintChannelChanged" Margin="0,4" />
-                  <TextBlock x:Name="GreenValue" Grid.Row="1" Grid.Column="2" FontSize="12" Foreground="{StaticResource MutedBrush}" FontFamily="Cascadia Mono, Consolas" HorizontalAlignment="Right" VerticalAlignment="Center" />
-                  <TextBlock Grid.Row="2" Text="B" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource SubtleBrush}" VerticalAlignment="Center" />
-                  <Slider x:Name="BlueSlider" Grid.Row="2" Grid.Column="1" Minimum="0" Maximum="255" Foreground="#60A5FA" ValueChanged="TintChannelChanged" />
-                  <TextBlock x:Name="BlueValue" Grid.Row="2" Grid.Column="2" FontSize="12" Foreground="{StaticResource MutedBrush}" FontFamily="Cascadia Mono, Consolas" HorizontalAlignment="Right" VerticalAlignment="Center" />
-                </Grid>
-                </StackPanel>
-
-                <TextBlock Text="WINDOW" Style="{StaticResource SectionLabel}" Margin="0,30,0,0" />
-                <Grid Margin="0,12,0,0">
+              <!-- Native options -->
+              <StackPanel Style="{StaticResource NativeOnly}">
+                <Grid>
                   <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                  <StackPanel VerticalAlignment="Center"><TextBlock Text="Corners" FontSize="13" /><TextBlock Text="Default keeps whatever the app asks for" FontSize="12" Foreground="{StaticResource SubtleBrush}" TextWrapping="Wrap" Margin="0,2,12,0" /></StackPanel>
-                  <Border Grid.Column="1" Style="{StaticResource SegmentGroup}" VerticalAlignment="Center">
+                  <StackPanel><TextBlock Text="Whole window" Style="{StaticResource OptionTitle}" /><TextBlock Text="Glass everywhere the app leaves clear, not just the title bar." Style="{StaticResource OptionHint}" /></StackPanel>
+                  <CheckBox Grid.Column="1" IsChecked="{Binding ExtendIntoClient}" VerticalAlignment="Center" />
+                </Grid>
+                <Grid Margin="0,16,0,0" Visibility="{Binding IsNotepad, Converter={StaticResource ShowIf}}">
+                  <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                  <StackPanel><TextBlock Text="Solid text area (HDR)" Style="{StaticResource OptionTitle}" /><TextBlock Text="Turn on if HDR is on and your typed text is invisible." Style="{StaticResource OptionHint}" /></StackPanel>
+                  <CheckBox Grid.Column="1" IsChecked="{Binding SolidTextArea}" VerticalAlignment="Center" />
+                </Grid>
+                <Grid Margin="0,16,0,0">
+                  <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                  <StackPanel><TextBlock Text="Stay glass when unfocused" Style="{StaticResource OptionTitle}" /><TextBlock Text="Windows normally goes flat when you click away." Style="{StaticResource OptionHint}" /></StackPanel>
+                  <CheckBox Grid.Column="1" IsChecked="{Binding KeepGlassWhenUnfocused}" VerticalAlignment="Center" />
+                </Grid>
+              </StackPanel>
+
+              <!-- Overlay options -->
+              <StackPanel Style="{StaticResource HostOnly}">
+                <Grid>
+                  <TextBlock Text="App opacity" Style="{StaticResource OptionTitle}" VerticalAlignment="Center" />
+                  <TextBlock Text="{Binding OpacityLabel}" FontSize="12" Foreground="{StaticResource SubtleBrush}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                </Grid>
+                <Slider Minimum="100" Maximum="255" Value="{Binding WindowOpacity}" Margin="0,6,0,0" />
+                <Grid Margin="0,16,0,0">
+                  <TextBlock Text="Tint strength" Style="{StaticResource OptionTitle}" VerticalAlignment="Center" />
+                  <TextBlock Text="{Binding TintLabel}" FontSize="12" Foreground="{StaticResource SubtleBrush}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                </Grid>
+                <Slider Minimum="0" Maximum="255" Value="{Binding TintOpacity}" Margin="0,6,0,0" />
+                <TextBlock Text="Tint" Style="{StaticResource OptionTitle}" Margin="0,18,0,8" />
+                <WrapPanel Margin="-4,0,0,0">
+                  <Button Style="{StaticResource SwatchButton}" Background="#181818" Tag="181818" ToolTip="Neutral" Click="SetTintPreset" />
+                  <Button Style="{StaticResource SwatchButton}" Background="#19324A" Tag="19324A" ToolTip="Ocean" Click="SetTintPreset" />
+                  <Button Style="{StaticResource SwatchButton}" Background="#0F594F" Tag="0F594F" ToolTip="Emerald" Click="SetTintPreset" />
+                  <Button Style="{StaticResource SwatchButton}" Background="#7200B8" Tag="7200B8" ToolTip="Violet" Click="SetTintPreset" />
+                  <Button Style="{StaticResource SwatchButton}" Background="#A2175B" Tag="A2175B" ToolTip="Rose" Click="SetTintPreset" />
+                  <Button Style="{StaticResource SwatchButton}" Background="#6B351A" Tag="6B351A" ToolTip="Amber" Click="SetTintPreset" />
+                  <Button Style="{StaticResource SwatchButton}" Background="{Binding TintHex}" ToolTip="Custom color…" Click="ChooseTintColor">
+                    <TextBlock Style="{StaticResource Icon}" Text="&#xE790;" FontSize="11" Foreground="#E6FFFFFF" />
+                  </Button>
+                </WrapPanel>
+                <Grid Margin="0,18,0,0">
+                  <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                  <StackPanel><TextBlock Text="Solid while media plays" Style="{StaticResource OptionTitle}" /><TextBlock Text="So video and the desktop don't mix." Style="{StaticResource OptionHint}" /></StackPanel>
+                  <CheckBox Grid.Column="1" IsChecked="{Binding PauseWhileMediaPlays}" VerticalAlignment="Center" />
+                </Grid>
+              </StackPanel>
+
+              <!-- Experimental hook, for the apps that have one -->
+              <StackPanel Visibility="{Binding HasHook, Converter={StaticResource ShowIf}}">
+                <Border Style="{StaticResource Divider}" />
+                <Grid>
+                  <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                  <StackPanel>
+                    <StackPanel Orientation="Horizontal">
+                      <TextBlock Text="Live glass" Style="{StaticResource OptionTitle}" />
+                      <Border Background="#33F87171" CornerRadius="4" Padding="6,1" Margin="8,0,0,0" VerticalAlignment="Center"><TextBlock Text="EXPERIMENTAL" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource DangerBrush}" /></Border>
+                    </StackPanel>
+                    <TextBlock Text="{Binding HookSummary}" Style="{StaticResource OptionHint}" />
+                  </StackPanel>
+                  <CheckBox Grid.Column="1" IsChecked="{Binding HookGlass}" VerticalAlignment="Center" />
+                </Grid>
+                <Grid Margin="0,10,0,0">
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition /></Grid.ColumnDefinitions>
+                  <TextBlock Style="{StaticResource Icon}" Text="&#xE7BA;" FontSize="12" Foreground="{StaticResource DangerBrush}" VerticalAlignment="Top" Margin="0,2,8,0" />
+                  <TextBlock Grid.Column="1" Text="{Binding HookWarning}" FontSize="12" Foreground="{StaticResource DangerBrush}" TextWrapping="Wrap" Margin="0,0,16,0" />
+                </Grid>
+                <TextBlock x:Name="ExplorerHookMissingText" Text="This build doesn't include the hook (it needs the 64-bit build with the native component)." FontSize="12" Foreground="{StaticResource DangerBrush}" TextWrapping="Wrap" Margin="0,6,0,0" Visibility="Collapsed" />
+              </StackPanel>
+
+              <!-- Advanced -->
+              <Border Style="{StaticResource Divider}" />
+              <Button Style="{StaticResource GhostButton}" HorizontalAlignment="Left" Padding="6,4" Margin="-6,0,0,0" Click="ToggleAdvanced">
+                <StackPanel Orientation="Horizontal">
+                  <TextBlock Text="Advanced" FontSize="12" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                  <TextBlock x:Name="AdvancedChevron" Style="{StaticResource Icon}" Text="&#xE70D;" FontSize="9" Margin="8,1,0,0" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                </StackPanel>
+              </Button>
+              <StackPanel x:Name="AdvancedPanel" Visibility="Collapsed" Margin="0,12,0,0">
+                <Grid>
+                  <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                  <TextBlock Text="Corners" Style="{StaticResource OptionTitle}" VerticalAlignment="Center" />
+                  <Border Grid.Column="1" Style="{StaticResource SegmentGroup}">
                     <StackPanel Orientation="Horizontal">
                       <RadioButton Style="{StaticResource Segment}" GroupName="Corners" Content="Default" IsChecked="{Binding Corners, Converter={StaticResource EnumMatch}, ConverterParameter=Default}" />
                       <RadioButton Style="{StaticResource Segment}" GroupName="Corners" Content="Round" IsChecked="{Binding Corners, Converter={StaticResource EnumMatch}, ConverterParameter=Round}" />
@@ -474,10 +307,10 @@
                     </StackPanel>
                   </Border>
                 </Grid>
-                <Grid Margin="0,14,0,0">
+                <Grid Margin="0,12,0,0">
                   <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                  <StackPanel VerticalAlignment="Center"><TextBlock Text="Title bar" FontSize="13" /><TextBlock Text="Force a dark or light frame on apps that ignore the system theme" FontSize="12" Foreground="{StaticResource SubtleBrush}" TextWrapping="Wrap" Margin="0,2,12,0" /></StackPanel>
-                  <Border Grid.Column="1" Style="{StaticResource SegmentGroup}" VerticalAlignment="Center">
+                  <TextBlock Text="Title bar" Style="{StaticResource OptionTitle}" VerticalAlignment="Center" />
+                  <Border Grid.Column="1" Style="{StaticResource SegmentGroup}">
                     <StackPanel Orientation="Horizontal">
                       <RadioButton Style="{StaticResource Segment}" GroupName="TitleBar" Content="Default" IsChecked="{Binding TitleBar, Converter={StaticResource EnumMatch}, ConverterParameter=Default}" />
                       <RadioButton Style="{StaticResource Segment}" GroupName="TitleBar" Content="Dark" IsChecked="{Binding TitleBar, Converter={StaticResource EnumMatch}, ConverterParameter=Dark}" />
@@ -485,57 +318,20 @@
                     </StackPanel>
                   </Border>
                 </Grid>
-
-                <StackPanel Style="{StaticResource HostOnly}">
-                <TextBlock Text="BEHAVIOR" Style="{StaticResource SectionLabel}" Margin="0,30,0,0" />
                 <Grid Margin="0,12,0,0">
-                  <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                  <StackPanel><TextBlock Text="Pause while media plays" FontSize="13" /><TextBlock Text="Make the app solid while it plays video or audio, so the desktop doesn't show through" FontSize="12" Foreground="{StaticResource SubtleBrush}" TextWrapping="Wrap" Margin="0,2,12,0" /></StackPanel>
-                  <CheckBox Grid.Column="1" IsChecked="{Binding PauseWhileMediaPlays}" VerticalAlignment="Center" />
+                  <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="200" /></Grid.ColumnDefinitions>
+                  <TextBlock Text="Process name" Style="{StaticResource OptionTitle}" VerticalAlignment="Center" />
+                  <TextBox Grid.Column="1" Text="{Binding ProcessName, UpdateSourceTrigger=PropertyChanged}" Tag="e.g. olk" />
                 </Grid>
+                <StackPanel Orientation="Horizontal" Margin="-6,16,0,0">
+                  <Button Style="{StaticResource GhostButton}" Padding="6,4" Click="ResetAppearance" Content="Reset to default" FontSize="12" />
+                  <Button Style="{StaticResource DangerButton}" Padding="6,4" Margin="8,0,0,0" Click="DeleteProfile" Content="Remove app" FontSize="12" ToolTip="Remove this app and restore its window" />
                 </StackPanel>
-
-                <Border Background="#148B5CF6" BorderBrush="#268B5CF6" BorderThickness="1" CornerRadius="8" Padding="12,10" Margin="0,24,0,0">
-                  <Grid>
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition /></Grid.ColumnDefinitions>
-                    <TextBlock Style="{StaticResource Icon}" Text="&#xE946;" Foreground="#C4B5FD" VerticalAlignment="Top" Margin="0,2,10,0" />
-                    <TextBlock Grid.Column="1" FontSize="12" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Text="Changes are staged until you Save &amp; apply. Stop restores the target window before the host exits." />
-                  </Grid>
-                </Border>
               </StackPanel>
-            </ScrollViewer>
-
-            <!-- Action bar -->
-            <Border Grid.Row="2" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Padding="18,12,18,12">
-              <Grid>
-                <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                <Button Style="{StaticResource DangerButton}" HorizontalAlignment="Left" Click="DeleteProfile" ToolTip="Remove this profile and restore the window">
-                  <StackPanel Orientation="Horizontal">
-                    <TextBlock Style="{StaticResource Icon}" Text="&#xE74D;" Margin="0,0,7,0" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
-                    <TextBlock Text="Delete" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
-                  </StackPanel>
-                </Button>
-                <StackPanel Grid.Column="1" Orientation="Horizontal">
-                  <Button Content="Stop" Click="StopProfile" Margin="0,0,8,0" ToolTip="Stop the effect and restore the window" />
-                  <Button Content="Save &amp; apply" Style="{StaticResource PrimaryButton}" Click="SaveAndApply" />
-                </StackPanel>
-              </Grid>
-            </Border>
-          </Grid>
+            </StackPanel>
+          </ScrollViewer>
         </Grid>
       </Border>
-    </Grid>
-
-    <!-- Status bar -->
-    <Grid Grid.Row="2" Margin="22,0,22,0">
-      <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-        <TextBlock Style="{StaticResource Icon}" Text="&#xE73E;" FontSize="11" Foreground="{StaticResource SubtleBrush}" Margin="0,0,8,0" />
-        <TextBlock x:Name="StatusText" Text="Ready" FontSize="12" Foreground="{StaticResource MutedBrush}" TextTrimming="CharacterEllipsis" />
-      </StackPanel>
-      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-        <Ellipse Width="7" Height="7" Fill="{StaticResource SuccessBrush}" Margin="0,0,8,0" />
-        <TextBlock Text="Live app detection" FontSize="12" Foreground="{StaticResource SubtleBrush}" />
-      </StackPanel>
     </Grid>
   </Grid>
 </Window>

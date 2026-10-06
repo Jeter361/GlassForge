@@ -3,10 +3,8 @@ using System.ComponentModel;
 using System.Drawing;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Media;
 using System.Windows.Threading;
 using WpfButton = System.Windows.Controls.Button;
-using WpfTextBox = System.Windows.Controls.TextBox;
 using GlassForge.Models;
 using GlassForge.Services;
 
@@ -19,10 +17,22 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly WindowDiscoveryService _discovery = new();
     private readonly System.Windows.Forms.NotifyIcon _tray;
     private readonly DispatcherTimer _appRefreshTimer = new() { Interval = TimeSpan.FromSeconds(2) };
+    // Edits apply live, once the user pauses: a slider drag or a typed name restarts the session once, not per tick.
+    private readonly DispatcherTimer _applyTimer = new() { Interval = TimeSpan.FromMilliseconds(400) };
+    private readonly HashSet<AppProfile> _pending = [];
     private IReadOnlyList<RunningApplication> _allRunningApps = [];
     private AppProfile? _selectedProfile;
     private bool _reallyClose;
-    private bool _updatingColor;
+
+    // Changes to these don't alter the glass, so they neither save nor restart a session.
+    private static readonly HashSet<string> DisplayOnly =
+    [
+        nameof(AppProfile.Icon), nameof(AppProfile.HasIcon), nameof(AppProfile.Initial), nameof(AppProfile.OpacityLabel),
+        nameof(AppProfile.TintLabel), nameof(AppProfile.TintHex), nameof(AppProfile.ModeLabel), nameof(AppProfile.ExecutablePath),
+        nameof(AppProfile.IsExplorer), nameof(AppProfile.IsTerminal), nameof(AppProfile.IsSettings), nameof(AppProfile.IsOffice),
+        nameof(AppProfile.IsNotepad), nameof(AppProfile.HasHook), nameof(AppProfile.HookSummary), nameof(AppProfile.HookWarning),
+        nameof(AppProfile.OfficeDisplayName), nameof(AppProfile.OfficeExeName)
+    ];
 
     public ObservableCollection<AppProfile> Profiles { get; }
     public ObservableCollection<RunningApplication> RunningApps { get; } = [];
@@ -34,6 +44,18 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _store = store;
         _hosts = hosts;
         Profiles = new ObservableCollection<AppProfile>(store.Load());
+        // Older versions named profiles after the window title ("notes.txt - Notepad"); show the app's own name.
+        var renamed = false;
+        foreach (var profile in Profiles)
+        {
+            if (AppIconService.FriendlyName(profile.ExecutablePath) is { } name && name != profile.DisplayName)
+            {
+                profile.DisplayName = name;
+                renamed = true;
+            }
+            profile.PropertyChanged += ProfileChanged;
+        }
+        if (renamed) SaveProfiles();
         SelectedProfile = Profiles.FirstOrDefault();
         DataContext = this;
         InitializeComponent();
@@ -43,17 +65,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             WindowBackdropService.KeepGlassWhenInactive(this);
         };
         StartupCheckBox.IsChecked = StartupService.IsEnabled;
-        RefreshRunningApplications();
-        UpdateColorControls();
-        _appRefreshTimer.Tick += (_, _) => RefreshRunningApplications(false);
-        _appRefreshTimer.Start();
-        // The running-apps list is only for the editor; don't rescan every process while sitting in the tray.
-        IsVisibleChanged += (_, _) =>
-        {
-            if (!IsVisible) { _appRefreshTimer.Stop(); return; }
-            RefreshRunningApplications(false);
-            _appRefreshTimer.Start();
-        };
+        _applyTimer.Tick += (_, _) => ApplyPending();
+        _appRefreshTimer.Tick += (_, _) => RefreshRunningApplications();
         if (!TargetWindowStyler.SupportsSystemBackdrop) NativeUnsupportedText.Visibility = Visibility.Visible;
         if (!HookLibrary.IsAvailable) ExplorerHookMissingText.Visibility = Visibility.Visible;
 
@@ -79,11 +92,48 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         return new System.Drawing.Icon(stream, System.Windows.Forms.SystemInformation.SmallIconSize);
     }
 
-    private void RefreshRunningApplications(bool announce = true)
+    private void ProfileChanged(object? sender, PropertyChangedEventArgs e)
     {
-        _allRunningApps = _discovery.GetRunningApplications();
+        if (sender is not AppProfile profile || e.PropertyName is null || DisplayOnly.Contains(e.PropertyName)) return;
+        _pending.Add(profile);
+        _applyTimer.Stop();
+        _applyTimer.Start();
+    }
+
+    private void ApplyPending()
+    {
+        _applyTimer.Stop();
+        SaveProfiles();
+        foreach (var profile in _pending.Where(Profiles.Contains)) _hosts.Restart(profile);
+        _pending.Clear();
+    }
+
+    // The add-app picker: running apps, minus the ones that already have glass. Only scanned while it's open.
+    private void ShowAddApp(object sender, RoutedEventArgs e) => AddAppPopup.IsOpen = true;
+
+    private void AddAppOpened(object? sender, EventArgs e)
+    {
+        AppSearchBox.Text = "";
+        RefreshRunningApplications();
+        _appRefreshTimer.Start();
+        AddAppPopup.Closed += StopRefreshing;
+        Dispatcher.BeginInvoke(() => AppSearchBox.Focus(), DispatcherPriority.Input);
+    }
+
+    private void StopRefreshing(object? sender, EventArgs e)
+    {
+        AddAppPopup.Closed -= StopRefreshing;
+        _appRefreshTimer.Stop();
+    }
+
+    private void RefreshRunningApplications()
+    {
+        var added = Profiles.Select(profile => profile.ProcessName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        _allRunningApps = _discovery.GetRunningApplications()
+            .Where(app => !added.Contains(app.ProcessName) && !app.ProcessName.Equals("ApplicationFrameHost", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(app => app.Name, StringComparer.CurrentCultureIgnoreCase)
+            .ToArray();
         ApplyAppFilter();
-        if (announce) StatusText.Text = $"Watching {RunningApps.Count} visible applications";
     }
 
     private void ApplyAppFilter()
@@ -91,8 +141,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var query = AppSearchBox?.Text.Trim() ?? string.Empty;
         var filtered = string.IsNullOrWhiteSpace(query)
             ? _allRunningApps
-            : _allRunningApps.Where(app => app.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase)
+            : _allRunningApps.Where(app => app.Name.Contains(query, StringComparison.OrdinalIgnoreCase)
                 || app.ProcessName.Contains(query, StringComparison.OrdinalIgnoreCase)).ToArray();
+        NoRunningAppsText.Visibility = _allRunningApps.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         var nextKeys = filtered.Select(app => app.ProcessName).ToArray();
         if (RunningApps.Select(app => app.ProcessName).SequenceEqual(nextKeys, StringComparer.OrdinalIgnoreCase)) return;
         RunningApps.Clear();
@@ -101,20 +152,33 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void AppSearchChanged(object sender, TextChangedEventArgs e) => ApplyAppFilter();
 
-    private void ProfileSelected(object sender, SelectionChangedEventArgs e) => UpdateColorControls();
-
-    private void AddRunningAppCard(object sender, RoutedEventArgs e)
+    private void AddRunningApp(object sender, RoutedEventArgs e)
     {
         if (sender is not WpfButton { DataContext: RunningApplication app }) return;
-        var existing = Profiles.FirstOrDefault(profile => profile.ProcessName.Equals(app.ProcessName, StringComparison.OrdinalIgnoreCase));
-        if (existing is not null) { SelectedProfile = existing; ProfilesList.SelectedItem = existing; return; }
-        var profile = new AppProfile { DisplayName = app.DisplayName, ProcessName = app.ProcessName, ExecutablePath = app.ExecutablePath ?? "" };
+        AddAppPopup.IsOpen = false;
+        var profile = new AppProfile { DisplayName = app.Name, ProcessName = app.ProcessName, ExecutablePath = app.ExecutablePath ?? "" };
+        profile.PropertyChanged += ProfileChanged;
         Profiles.Add(profile);
         SelectedProfile = profile;
-        ProfilesList.SelectedItem = profile;
         SaveProfiles();
-        StatusText.Text = $"Added {profile.DisplayName}";
+        _hosts.Restart(profile);
     }
+
+    private void ProfileSelected(object sender, SelectionChangedEventArgs e)
+    {
+        if (AdvancedPanel is null || AdvancedChevron is null) return; // the first selection lands while the XAML loads
+        AdvancedPanel.Visibility = Visibility.Collapsed;
+        AdvancedChevron.Text = "";
+    }
+
+    private void ToggleAdvanced(object sender, RoutedEventArgs e)
+    {
+        var show = AdvancedPanel.Visibility != Visibility.Visible;
+        AdvancedPanel.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        AdvancedChevron.Text = show ? "" : "";
+    }
+
+    private void ShowSettings(object sender, RoutedEventArgs e) => SettingsPopup.IsOpen = true;
 
     // Click, not Checked: Checked also fires when a Native profile is merely shown, and would undo the user's choice.
     private void NativeModeChosen(object sender, RoutedEventArgs e)
@@ -126,113 +190,36 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         if (SelectedProfile is null || sender is not WpfButton { Tag: string color }) return;
         SelectedProfile.TintColor = color;
-        UpdateColorControls();
     }
 
-    private void ResetAppearance(object sender, RoutedEventArgs e)
-    {
-        if (SelectedProfile is null) return;
-        SelectedProfile.ResetAppearance();
-        UpdateColorControls();
-        StatusText.Text = "Restored the neutral GlassForge defaults; select Save & apply to use them";
-    }
+    private void ResetAppearance(object sender, RoutedEventArgs e) => SelectedProfile?.ResetAppearance();
 
     private void ChooseTintColor(object sender, RoutedEventArgs e)
     {
         if (SelectedProfile is null) return;
         using var dialog = new System.Windows.Forms.ColorDialog { FullOpen = true, AnyColor = true };
-        if (TryParseColor(SelectedProfile.TintColor, out var red, out var green, out var blue))
-            dialog.Color = System.Drawing.Color.FromArgb(red, green, blue);
+        if (uint.TryParse(SelectedProfile.TintColor, System.Globalization.NumberStyles.HexNumber, null, out var rgb))
+            dialog.Color = System.Drawing.Color.FromArgb((int)(rgb | 0xFF000000));
         if (dialog.ShowDialog() != System.Windows.Forms.DialogResult.OK) return;
         SelectedProfile.TintColor = $"{dialog.Color.R:X2}{dialog.Color.G:X2}{dialog.Color.B:X2}";
-        UpdateColorControls();
-    }
-
-    private void TintHexChanged(object sender, TextChangedEventArgs e)
-    {
-        if (_updatingColor || SelectedProfile is null || sender is not WpfTextBox box) return;
-        var value = box.Text.Trim().TrimStart('#');
-        if (!TryParseColor(value, out _, out _, out _)) return;
-        SelectedProfile.TintColor = value;
-        UpdateColorControls();
-    }
-
-    private void TintChannelChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-    {
-        if (_updatingColor || SelectedProfile is null || RedSlider is null || GreenSlider is null || BlueSlider is null) return;
-        var red = (byte)Math.Round(RedSlider.Value);
-        var green = (byte)Math.Round(GreenSlider.Value);
-        var blue = (byte)Math.Round(BlueSlider.Value);
-        SelectedProfile.TintColor = $"{red:X2}{green:X2}{blue:X2}";
-        UpdateColorControls();
-    }
-
-    private void UpdateColorControls()
-    {
-        if (ColorPreview is null || RedSlider is null || GreenSlider is null || BlueSlider is null
-            || RedValue is null || GreenValue is null || BlueValue is null || SelectedProfile is null) return;
-        if (!TryParseColor(SelectedProfile.TintColor, out var red, out var green, out var blue)) return;
-        _updatingColor = true;
-        try
-        {
-            RedSlider.Value = red;
-            GreenSlider.Value = green;
-            BlueSlider.Value = blue;
-            RedValue.Text = red.ToString();
-            GreenValue.Text = green.ToString();
-            BlueValue.Text = blue.ToString();
-            ColorPreview.Background = new SolidColorBrush(System.Windows.Media.Color.FromRgb(red, green, blue));
-        }
-        finally { _updatingColor = false; }
-    }
-
-    private static bool TryParseColor(string value, out byte red, out byte green, out byte blue)
-    {
-        red = green = blue = 0;
-        value = value.Trim().TrimStart('#');
-        if (value.Length != 6 || !uint.TryParse(value, System.Globalization.NumberStyles.HexNumber, null, out var rgb)) return false;
-        red = (byte)(rgb >> 16);
-        green = (byte)(rgb >> 8);
-        blue = (byte)rgb;
-        return true;
-    }
-
-    private void SaveAndApply(object sender, RoutedEventArgs e)
-    {
-        if (SelectedProfile is null) return;
-        if (SelectedProfile.TintColor.Length != 6 || !uint.TryParse(SelectedProfile.TintColor, System.Globalization.NumberStyles.HexNumber, null, out _))
-        {
-            StatusText.Text = "Tint must be a six-digit hex color, for example 181818.";
-            return;
-        }
-        SaveProfiles();
-        _hosts.Restart(SelectedProfile);
-        StatusText.Text = $"Applied {SelectedProfile.DisplayName}";
-    }
-
-    private void StopProfile(object sender, RoutedEventArgs e)
-    {
-        if (SelectedProfile is null) return;
-        _hosts.Stop(SelectedProfile.Id);
-        StatusText.Text = $"Stopped {SelectedProfile.DisplayName}";
     }
 
     private void DeleteProfile(object sender, RoutedEventArgs e)
     {
         if (SelectedProfile is null) return;
         var remove = SelectedProfile;
+        remove.PropertyChanged -= ProfileChanged;
+        _pending.Remove(remove);
         _hosts.Stop(remove.Id);
         Profiles.Remove(remove);
         SelectedProfile = Profiles.FirstOrDefault();
         SaveProfiles();
-        RefreshRunningApplications();
-        StatusText.Text = $"Removed {remove.DisplayName}; its original window style was restored";
     }
 
     private void StartupChanged(object sender, RoutedEventArgs e)
     {
-        try { StartupService.SetEnabled(StartupCheckBox.IsChecked == true); StatusText.Text = "Startup preference saved"; }
-        catch (Exception exception) { StatusText.Text = exception.Message; }
+        try { StartupService.SetEnabled(StartupCheckBox.IsChecked == true); }
+        catch (Exception) { StartupCheckBox.IsChecked = StartupService.IsEnabled; }
     }
 
     private void SaveProfiles() => _store.Save(Profiles);
@@ -250,7 +237,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var maximized = WindowState == WindowState.Maximized;
         RootGrid.Margin = maximized ? new Thickness(7) : new Thickness(0);
         WindowBackdropService.Apply(this); // WPF can restore the system menu style on state changes
-        MaximizeGlyph.Text = maximized ? "î¤£" : "î¤¢";
+        MaximizeGlyph.Text = maximized ? "" : "";
     }
 
     protected override void OnClosing(CancelEventArgs e)
@@ -258,10 +245,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (!_reallyClose)
         {
             e.Cancel = true;
+            if (_applyTimer.IsEnabled) ApplyPending();
             Hide();
-            StatusText.Text = "GlassForge is running in the notification area";
             return;
         }
+        if (_applyTimer.IsEnabled) ApplyPending();
         _tray.Visible = false;
         _tray.Dispose();
         _appRefreshTimer.Stop();

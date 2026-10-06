@@ -62,6 +62,33 @@ internal static class AppIconService
         return icon;
     }
 
+    private static readonly Dictionary<string, string?> Names = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The app's own name ("Notepad", "Microsoft Teams") from its exe's version info, or null when it has none.
+    /// Window titles change with the open document, so they make poor names for a profile.
+    /// </summary>
+    internal static string? FriendlyName(string? executablePath)
+    {
+        if (string.IsNullOrEmpty(executablePath)) return null;
+        if (Names.TryGetValue(executablePath, out var cached)) return cached;
+        string? name = Path.GetFileNameWithoutExtension(executablePath).ToLowerInvariant() switch
+        {
+            "explorer" => "File Explorer",          // "Windows Explorer"
+            "windowsterminal" => "Windows Terminal", // "Windows Terminal Host"
+            _ => null
+        };
+        if (name is not null) return Names[executablePath] = name;
+        try
+        {
+            var description = FileVersionInfo.GetVersionInfo(executablePath).FileDescription?.Trim();
+            if (!string.IsNullOrEmpty(description))
+                name = description.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? description[..^4] : description;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException) { }
+        return Names[executablePath] = name;
+    }
+
     internal static ImageSource? For(string? executablePath, int processId = 0)
     {
         if (string.IsNullOrEmpty(executablePath)) return processId != 0 ? FromWindow(processId) : null;
