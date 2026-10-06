@@ -20,6 +20,7 @@
 #include <cstdlib>
 #include <algorithm>
 #include <vector>
+#include <set>
 #include <wrl/client.h>
 #include <map>
 #include <string>
@@ -194,6 +195,8 @@ float4 PS(float4 position : SV_Position) : SV_Target
         unsigned frames = 0;
         bool logged = false;
         bool unsupported = false;
+        UINT64 area = 0;          // frame size, to tell the root layer from the others
+        ULONGLONG lastSeen = 0;
         ComPtr<ID3D11Texture2D> detectStaging;
         bool detectPending = false;
         // Letterbox trimming of the keep-solid areas: a video shown "contained" (LogMeIn's remote screen) has black
@@ -211,6 +214,10 @@ float4 PS(float4 position : SV_Position) : SV_Target
 
     std::map<ID3D11Device*, DeviceResources> g_devices;
     std::map<IDXGISwapChain*, ChainResources> g_chains;
+    // Composition swap chains this hook switched from "alpha ignored" to premultiplied. Chromium/WebView2 build a frame
+    // from many such layers whose alpha means nothing; only the root layer gets the glass, the rest are forced opaque
+    // again every frame, or their content (text) would vanish wherever its alpha happens to be 0.
+    std::set<IDXGISwapChain*> g_forcedOpaque;
 
     bool SameRects(const RECT* a, const RECT* b, UINT32 count)
     {
@@ -532,8 +539,18 @@ float4 PS(float4 position : SV_Position) : SV_Target
             chain.height = frameDesc.Height;
             chain.format = frameDesc.Format;
         }
-        DetectBackground(device.Get(), context.Get(), frame.Get(), chain, DetectNow(chain.frames++));
-        if (!chain.haveBackground) { ReleaseSRWLockExclusive(&g_lock); return; }
+        // The root layer is the largest one presented lately; only it gets the glass.
+        const ULONGLONG now = GetTickCount64();
+        chain.area = UINT64(frameDesc.Width) * frameDesc.Height;
+        chain.lastSeen = now;
+        UINT64 largest = 0;
+        for (const auto& [other, state] : g_chains)
+            if (now - state.lastSeen < 2000) largest = std::max(largest, state.area);
+        const bool root = chain.area * 10 >= largest * 9;
+        const bool forced = g_forcedOpaque.count(swapChain) != 0;
+        if (root) DetectBackground(device.Get(), context.Get(), frame.Get(), chain, DetectNow(chain.frames++));
+        const bool glass = root && chain.haveBackground;
+        if (!glass && !forced) { ReleaseSRWLockExclusive(&g_lock); return; }
 
         ComPtr<ID3D11RenderTargetView> target;
         if (FAILED(device->CreateRenderTargetView(frame.Get(), nullptr, &target))) { chain.unsupported = true; ReleaseSRWLockExclusive(&g_lock); return; }
@@ -544,8 +561,20 @@ float4 PS(float4 position : SV_Position) : SV_Target
             for (int i = 0; i < 3; ++i) params.background2[i] = chain.background2[i];
             params.background2[3] = 1;
         }
-        ReadKeepAreas(params);
-        TrimKeepAreas(device.Get(), context.Get(), frame.Get(), chain, params);
+        if (glass)
+        {
+            ReadKeepAreas(params);
+            TrimKeepAreas(device.Get(), context.Get(), frame.Get(), chain, params);
+        }
+        else
+        {
+            // Another layer we made premultiplied: keep all of it, fully opaque, as the app meant it.
+            params.keepCount = 1;
+            params.keep[0][0] = 0;
+            params.keep[0][1] = 0;
+            params.keep[0][2] = INT32(frameDesc.Width);
+            params.keep[0][3] = INT32(frameDesc.Height);
+        }
 
         ComPtr<ID3DDeviceContextState> previous;
         context1->SwapDeviceContextState(resources.state.Get(), &previous);
@@ -720,7 +749,13 @@ float4 PS(float4 position : SV_Position) : SV_Target
             premultiplied.AlphaMode = DXGI_ALPHA_MODE_PREMULTIPLIED;
             const HRESULT result = Real_CreateSwapChainForComposition(factory, device, &premultiplied, output, chain);
             Log(L"dxgi: composition swap chain %ux%u format %d made premultiplied (%08X)", desc->Width, desc->Height, desc->Format, result);
-            if (SUCCEEDED(result)) return result;
+            if (SUCCEEDED(result))
+            {
+                AcquireSRWLockExclusive(&g_lock);
+                g_forcedOpaque.insert(*chain);
+                ReleaseSRWLockExclusive(&g_lock);
+                return result;
+            }
         }
         return Real_CreateSwapChainForComposition(factory, device, desc, output, chain);
     }
@@ -888,6 +923,7 @@ void RemoveDxgiGlass()
         DetourDetach(reinterpret_cast<PVOID*>(&Real_DwmExtendFrameIntoClientArea), reinterpret_cast<PVOID>(Hook_DwmExtendFrameIntoClientArea));
         g_installed = DetourTransactionCommit() != NO_ERROR;
         g_chains.clear();
+        g_forcedOpaque.clear();
         g_devices.clear();
         if (g_keepView) UnmapViewOfFile(g_keepView);
         if (g_keepMapping) CloseHandle(g_keepMapping);
