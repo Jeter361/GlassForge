@@ -694,3 +694,41 @@ the opt-in only revealed the static material. Reverted; the profile's hook is of
 environment is created before a window exists, so a window-triggered hook is too late to inject a script). **Classic
 Outlook** (`OUTLOOK.EXE`, which loads `mso40uiwin32client.dll`) would be a different case - it would go through the
 Office path (like Word/Excel) where the brush swap gave live glass. Untested here (the new client is what runs).
+
+---
+
+# Update 9: Generic DXGI glass ("glass for any app") and LogMeIn Resolve — parked (Oct 6, 2026)
+
+**State:** working end to end on LogMeIn Resolve Desktop Console (Qt 6.8, QtWebEngine) through dev tools, not wired
+into the app. Parked by the user after the stream performance concern; LogMeIn runs normally again.
+
+**Idea.** Apps that draw with DXGI (Chromium/Electron, Qt Quick/RHI, Flutter, most modern apps) have no backdrop brush
+to swap and no GDI fill to redraw. `native/hook/dxgiglass.cpp` detours `Present`/`Present1` (addresses from a
+throwaway swap chain) and runs a color-to-alpha pixel shader on every frame: the app's dominant background color
+becomes premultiplied transparency, anti-aliased text keeps clean edges, 12% of the background stays as tint (55% was
+tried and rejected).
+
+**What it took (each found the hard way):**
+
+| Problem | Fix |
+| --- | --- |
+| DWM ignores alpha on window-bound (`CreateSwapChainForHwnd`) swap chains: cleared background showed black | Detour the creation calls, make a premultiplied composition swap chain instead, show it on the window via a DirectComposition target |
+| That substitution must be in place before the app makes its swap chain | Launch with the hook loaded: `rundll32 GlassForge.Hook.dll,LaunchWithGlass <cmd>` (Detours, ordinal 1 exported). Packaged (MSIX) apps can't be started this way |
+| Splash screen color picked first | Re-detect a few times early; replacing a known color needs a majority |
+| Remote screen showed through | Keep-solid rectangles published from outside (`native/tools/keep-areas.ps1`, UI Automation raw view, `VideoStream_Video`) in `Local\GlassForge.DxgiKeep.<pid>` |
+| Letterbox bars inside the kept area stayed black | Non-blocking read-back trims black edge rows/columns; the cut-off bars are drawn as plain tinted glass |
+| Focus changes flashed white then grey | Window procedure answers `WM_NCACTIVATE` TRUE (no `WM_ACTIVATE` swallowing, so no Office-style first-click issue) |
+| Qt resets the frame margins | `DwmExtendFrameIntoClientArea` detoured to −1 for kept windows |
+| White box when the window grew past its launch size | The app never paints its GDI redirection surface; `WM_ERASEBKGND` now fills it black (transparent) |
+| Full-screen remote view | Windows covering their monitor pass through untouched |
+| Full screen toggled: QtWebEngine stops reporting the session page's contents to UI Automation (the page stays, the video element doesn't come back; `--force-renderer-accessibility` didn't help and costs performance) | Remember the video's insets inside the session page while visible; apply them to the page rectangle afterwards |
+| Stream performance | Detection and trimming read back with `DO_NOT_WAIT`; window procedures use their own lock; publisher reuses elements, full search every 3 s |
+
+**Rejected / don't redo:** keying up to three extra flat colors (to make LogMeIn's black title strip and sidebar
+glass) was "too glitchy" and was reverted. Having the hook set Acrylic itself while GlassForge's profile was paused
+gave a light wash; keep GlassForge's Native profile doing the DWM side. **ChatGPT (packaged Electron):** route sketched
+(hook the browser through its window, the GPU process at birth via `CreateProcess` detours) but untested — right after
+killing its GPU process the whole desktop went grey (cause unconfirmed), so warn before repeating.
+
+**Next (user's plan):** an in-app experimental "smart" mode that diagnoses any app (framework, swap chain vs GDI,
+packaged, elevated, WebView2/Chromium children) and applies the matching route automatically.
