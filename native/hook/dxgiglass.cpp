@@ -219,6 +219,9 @@ float4 PS(float4 position : SV_Position) : SV_Target
     // from many such layers whose alpha means nothing; only the root layer gets the glass, the rest are forced opaque
     // again every frame, or their content (text) would vanish wherever its alpha happens to be 0.
     std::set<IDXGISwapChain*> g_forcedOpaque;
+    // The root layer, once chosen, stays the root while it is presented, unless another layer gets clearly bigger:
+    // an overlay or menu briefly as big as the window must not move the glass to itself and back.
+    IDXGISwapChain* g_root = nullptr;
 
     bool SameRects(const RECT* a, const RECT* b, UINT32 count)
     {
@@ -549,12 +552,20 @@ float4 PS(float4 position : SV_Position) : SV_Target
         const ULONGLONG now = GetTickCount64();
         chain.area = UINT64(frameDesc.Width) * frameDesc.Height;
         chain.lastSeen = now;
-        UINT64 largest = 0;
-        for (const auto& [other, state] : g_chains)
-            if (now - state.lastSeen < 2000) largest = std::max(largest, state.area);
-        const bool root = chain.area * 10 >= largest * 9;
         const bool forced = g_forcedOpaque.count(swapChain) != 0;
-        if (root) DetectBackground(device.Get(), context.Get(), frame.Get(), chain, DetectNow(chain.frames++));
+        bool root = true;
+        if (forced)
+        {
+            const auto current = g_root ? g_chains.find(g_root) : g_chains.end();
+            const bool rootAlive = current != g_chains.end() && now - current->second.lastSeen < 2000;
+            if (!rootAlive || (swapChain != g_root && chain.area * 2 > current->second.area * 3)) g_root = swapChain;
+            root = swapChain == g_root;
+        }
+        // Multi-layer apps keep the background they settled on: a message full of white or another panel must not
+        // switch which color turns to glass (the first checks still catch the splash screen giving way).
+        const bool settled = forced && chain.haveBackground && chain.frames > 300;
+        if (root && !settled) DetectBackground(device.Get(), context.Get(), frame.Get(), chain, DetectNow(chain.frames));
+        chain.frames++;
         const bool glass = root && chain.haveBackground;
         if (!glass && !forced) { ReleaseSRWLockExclusive(&g_lock); return; }
 
