@@ -1,9 +1,10 @@
-# Dev tool for the experimental DXGI glass (hook/dxgiglass.cpp): finds areas of an app that must stay solid (by
-# default LogMeIn Resolve's remote-session view, an embedded page named "session/...") with UI Automation, and publishes
-# them every second in Local\GlassForge.DxgiKeep.<pid>, where the hook reads them. Runs until the stop file appears.
+# Dev tool for the experimental DXGI glass (hook/dxgiglass.cpp): finds areas of an app that must stay solid with UI
+# Automation and publishes them every second in Local\GlassForge.DxgiKeep.<pid>, where the hook reads them. By default
+# that is LogMeIn Resolve's remote screen: the session page's <video> element (AutomationId ending in
+# "VideoStream_Video"), which only shows up in the raw view. Runs until the stop file appears.
 param(
     [string] $Process = 'ra-technician-console',
-    [string] $DocumentPrefix = 'session',
+    [string] $AutomationIdSuffix = 'VideoStream_Video',
     [string] $StopFile = "$env:LOCALAPPDATA\GlassForge\hook.stop"
 )
 Add-Type -Namespace Ka -Name W -MemberDefinition @'
@@ -19,23 +20,42 @@ if (-not $target) { throw "$Process has no window" }
 $window = $target.MainWindowHandle
 $mapping = [IO.MemoryMappedFiles.MemoryMappedFile]::CreateOrOpen("Local\GlassForge.DxgiKeep.$($target.Id)", 4 + 8 * 16)
 $view = $mapping.CreateViewAccessor()
-$documents = New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::Document)
+$walker = [Windows.Automation.TreeWalker]::RawViewWalker
+
+# Depth-first through the raw view; the remote screen is ~25 levels down inside the web console.
+function Find-Element($element, [int] $depth) {
+    if ($depth -gt 40) { return $null }
+    $child = $walker.GetFirstChild($element)
+    while ($child) {
+        if ($child.Current.AutomationId.EndsWith($AutomationIdSuffix)) { return $child }
+        $found = Find-Element $child ($depth + 1)
+        if ($found) { return $found }
+        $child = $walker.GetNextSibling($child)
+    }
+    return $null
+}
+
 Write-Output "publishing keep areas for $Process (pid $($target.Id), window $window)"
 $last = ''
+$element = $null
+$searched = [datetime]::MinValue
 while (-not (Test-Path $StopFile)) {
     $rects = @()
     try {
-        $root = [Windows.Automation.AutomationElement]::FromHandle($window)
-        $origin = New-Object Ka.W+POINT
-        [void][Ka.W]::ClientToScreen($window, [ref]$origin)
-        foreach ($doc in $root.FindAll([Windows.Automation.TreeScope]::Descendants, $documents)) {
-            if (-not $doc.Current.Name.StartsWith($DocumentPrefix)) { continue }
-            $r = $doc.Current.BoundingRectangle
-            if ($r.IsEmpty -or $r.Width -lt 1) { continue }
-            $rects += , @([int]($r.Left - $origin.X), [int]($r.Top - $origin.Y), [int]($r.Right - $origin.X), [int]($r.Bottom - $origin.Y))
+        # Reuse the element while it lives; look again every 3 s when there is none (no session open).
+        if (-not $element -and ([datetime]::Now - $searched).TotalSeconds -ge 3) {
+            $searched = [datetime]::Now
+            $element = Find-Element ([Windows.Automation.AutomationElement]::FromHandle($window)) 0
         }
-    } catch { }
-    if ($rects.Count -gt 8) { $rects = $rects[0..7] }
+        if ($element) {
+            $r = $element.Current.BoundingRectangle
+            if (-not $r.IsEmpty -and $r.Width -ge 1) {
+                $origin = New-Object Ka.W+POINT
+                [void][Ka.W]::ClientToScreen($window, [ref]$origin)
+                $rects += , @([int]($r.Left - $origin.X), [int]($r.Top - $origin.Y), [int]($r.Right - $origin.X), [int]($r.Bottom - $origin.Y))
+            }
+        }
+    } catch { $element = $null } # the session closed: the element is gone
     for ($i = 0; $i -lt $rects.Count; $i++) { for ($j = 0; $j -lt 4; $j++) { $view.Write(4 + $i * 16 + $j * 4, [int]$rects[$i][$j]) } }
     $view.Write(0, [int]$rects.Count)
     $now = ($rects | ForEach-Object { "[" + ($_ -join ",") + "]" }) -join " "
