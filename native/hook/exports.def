@@ -3,3 +3,4 @@ EXPORTS
     DllCanUnloadNow PRIVATE
     DetourFinishHelperProcess @1 NONAME
     LaunchWithGlassW
+    AttachToPackageProcessW

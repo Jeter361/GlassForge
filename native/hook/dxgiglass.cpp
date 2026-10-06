@@ -913,3 +913,28 @@ extern "C" void CALLBACK LaunchWithGlassW(HWND, HINSTANCE, LPWSTR commandLine, i
     Log(L"launch with glass: %s -> %s (pid %lu)", commandLine, ok ? L"started" : L"FAILED", process.dwProcessId);
     if (ok) { CloseHandle(process.hThread); CloseHandle(process.hProcess); }
 }
+
+// Store (MSIX) apps can't be started by CreateProcess, so LaunchWithGlass can't reach them. Windows' package debug
+// settings (IPackageDebugSettings::EnableDebugging) can: every launch of the package starts suspended and runs
+//   rundll32 GlassForge.Hook.dll,AttachToPackageProcess -p <pid> -tid <tid>
+// first. The hook joins the paused process's import table (as LaunchWithGlass does for a process it creates) and
+// resumes it, so it is in place before the app makes its first swap chain or child process.
+extern "C" void CALLBACK AttachToPackageProcessW(HWND, HINSTANCE, LPWSTR commandLine, int)
+{
+    DWORD processId = 0, threadId = 0;
+    if (const wchar_t* p = wcsstr(commandLine, L"-p ")) processId = wcstoul(p + 3, nullptr, 10);
+    if (const wchar_t* t = wcsstr(commandLine, L"-tid ")) threadId = wcstoul(t + 5, nullptr, 10);
+    char dll[MAX_PATH]{};
+    HMODULE self = nullptr;
+    GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+        reinterpret_cast<LPCWSTR>(&AttachToPackageProcessW), &self);
+    GetModuleFileNameA(self, dll, MAX_PATH);
+    HANDLE process = OpenProcess(PROCESS_ALL_ACCESS, FALSE, processId);
+    HANDLE thread = OpenThread(THREAD_SUSPEND_RESUME, FALSE, threadId);
+    LPCSTR dlls[] = { dll };
+    const BOOL hooked = process && DetourUpdateProcessWithDll(process, dlls, 1);
+    Log(L"package launch: pid %lu thread %lu %s", processId, threadId, hooked ? L"gets the hook" : L"could NOT be hooked; started plainly");
+    // Always let the app run, hooked or not: PLM waits on this before the app starts.
+    if (thread) { ResumeThread(thread); CloseHandle(thread); }
+    if (process) CloseHandle(process);
+}
