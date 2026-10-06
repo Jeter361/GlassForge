@@ -429,13 +429,19 @@ float4 PS(float4 position : SV_Position) : SV_Target
         toRgb(best, found);
         // A second flat color covering a tenth of the window is keyed too (where it surrounds the pixel).
         const bool hadSecond = chain.haveBackground2;
-        chain.haveBackground2 = secondCount * 10 >= samples;
+        // Only a color of the same family: a dark app's black sidebar, never its white text or a light panel (keying
+        // those washes the window out).
+        float candidate[3];
+        toRgb(second, candidate);
+        auto light = [](const float* rgb) { return std::max({ rgb[0], rgb[1], rgb[2] }) > 0.5f; };
+        chain.haveBackground2 = secondCount * 10 >= samples && light(candidate) == light(found);
         if (chain.haveBackground2)
         {
             float previous[3] = { chain.background2[0], chain.background2[1], chain.background2[2] };
-            toRgb(second, chain.background2);
+            for (int i = 0; i < 3; ++i) chain.background2[i] = candidate[i];
             if (!hadSecond || previous[0] != chain.background2[0] || previous[1] != chain.background2[1] || previous[2] != chain.background2[2])
-                Log(L"dxgi: second background #%06X (%u%% of samples)", second, secondCount * 100 / samples);
+                Log(L"dxgi: second background #%02X%02X%02X (%u%% of samples)", int(candidate[0] * 255 + .5f), int(candidate[1] * 255 + .5f),
+                    int(candidate[2] * 255 + .5f), secondCount * 100 / samples);
         }
         const bool changed = !chain.haveBackground || found[0] != chain.background[0] || found[1] != chain.background[1] || found[2] != chain.background[2];
         for (int i = 0; i < 3; ++i) chain.background[i] = found[i];
@@ -554,6 +560,21 @@ float4 PS(float4 position : SV_Position) : SV_Target
 
     std::map<HWND, WNDPROC> g_originalProcs;
 
+    // Qt (and others) reset the frame margins themselves, on activation and resize; the window's own white surface then
+    // shows wherever the frame is see-through. For kept windows, every such call extends the frame over the whole window.
+    using ExtendFrameFn = HRESULT(WINAPI*)(HWND, const MARGINS*);
+    ExtendFrameFn Real_DwmExtendFrameIntoClientArea = DwmExtendFrameIntoClientArea;
+
+    HRESULT WINAPI Hook_DwmExtendFrameIntoClientArea(HWND window, const MARGINS* margins)
+    {
+        AcquireSRWLockShared(&g_lock);
+        const bool kept = g_originalProcs.count(window) != 0;
+        ReleaseSRWLockShared(&g_lock);
+        if (!kept) return Real_DwmExtendFrameIntoClientArea(window, margins);
+        static const MARGINS whole{ -1, -1, -1, -1 };
+        return Real_DwmExtendFrameIntoClientArea(window, &whole);
+    }
+
     LRESULT CALLBACK KeepFrameActive(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
     {
         AcquireSRWLockShared(&g_lock);
@@ -561,6 +582,22 @@ float4 PS(float4 position : SV_Position) : SV_Target
         const WNDPROC original = it == g_originalProcs.end() ? DefWindowProcW : it->second;
         ReleaseSRWLockShared(&g_lock);
         if (message == WM_NCACTIVATE) return CallWindowProcW(original, window, message, TRUE, lParam);
+        // Under the composition layer the window keeps its ordinary GDI surface. The app never paints it (it draws
+        // with DXGI), so when the window grows Windows fills the new part white, which shows through every see-through
+        // pixel as a white box. Black there is fully transparent in the extended frame.
+        if (message == WM_ERASEBKGND)
+        {
+            RECT client{};
+            GetClientRect(window, &client);
+            FillRect(reinterpret_cast<HDC>(wParam), &client, static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
+            return 1;
+        }
+        if (message == WM_SIZE)
+        {
+            const LRESULT result = CallWindowProcW(original, window, message, wParam, lParam);
+            RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ERASENOW);
+            return result;
+        }
         if (message == WM_NCDESTROY)
         {
             SetWindowLongPtrW(window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(original));
@@ -580,6 +617,7 @@ float4 PS(float4 position : SV_Position) : SV_Target
         GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN, reinterpret_cast<LPCWSTR>(&KeepFrameActive), &self);
         g_originalProcs[window] = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(KeepFrameActive)));
         PostMessageW(window, WM_NCACTIVATE, TRUE, 0);
+        RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE);
         // The glass itself: live Acrylic behind the whole window. Set once from inside the app, so nothing outside
         // has to keep re-applying it on focus changes.
         const int acrylic = 3; // DWMSBT_TRANSIENTWINDOW
@@ -588,7 +626,7 @@ float4 PS(float4 position : SV_Position) : SV_Target
         const BOOL dark = TRUE;
         DwmSetWindowAttribute(window, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof dark);
         const HRESULT backdrop = DwmSetWindowAttribute(window, DWMWA_SYSTEMBACKDROP_TYPE, &acrylic, sizeof acrylic);
-        const HRESULT extend = DwmExtendFrameIntoClientArea(window, &whole);
+        const HRESULT extend = Real_DwmExtendFrameIntoClientArea(window, &whole);
         Log(L"dxgi: window %p kept drawn as active; acrylic %08X, whole-window frame %08X", window, backdrop, extend);
     }
 
@@ -797,6 +835,7 @@ void InstallDxgiGlass()
         DetourAttach(reinterpret_cast<PVOID*>(&Real_CreateSwapChainForComposition), reinterpret_cast<PVOID>(Hook_CreateSwapChainForComposition));
         DetourAttach(reinterpret_cast<PVOID*>(&Real_CreateProcessW), reinterpret_cast<PVOID>(Hook_CreateProcessW));
         DetourAttach(reinterpret_cast<PVOID*>(&Real_CreateProcessAsUserW), reinterpret_cast<PVOID>(Hook_CreateProcessAsUserW));
+        DetourAttach(reinterpret_cast<PVOID*>(&Real_DwmExtendFrameIntoClientArea), reinterpret_cast<PVOID>(Hook_DwmExtendFrameIntoClientArea));
         const LONG result = DetourTransactionCommit();
         g_installed = result == NO_ERROR;
         Log(L"dxgi: present and swap chain detours %s (%ld)", g_installed ? L"installed" : L"FAILED", result);
@@ -818,6 +857,7 @@ void RemoveDxgiGlass()
         DetourDetach(reinterpret_cast<PVOID*>(&Real_CreateSwapChainForComposition), reinterpret_cast<PVOID>(Hook_CreateSwapChainForComposition));
         DetourDetach(reinterpret_cast<PVOID*>(&Real_CreateProcessW), reinterpret_cast<PVOID>(Hook_CreateProcessW));
         DetourDetach(reinterpret_cast<PVOID*>(&Real_CreateProcessAsUserW), reinterpret_cast<PVOID>(Hook_CreateProcessAsUserW));
+        DetourDetach(reinterpret_cast<PVOID*>(&Real_DwmExtendFrameIntoClientArea), reinterpret_cast<PVOID>(Hook_DwmExtendFrameIntoClientArea));
         g_installed = DetourTransactionCommit() != NO_ERROR;
         g_chains.clear();
         g_devices.clear();
