@@ -110,7 +110,9 @@ float4 PS(float4 position : SV_Position) : SV_Target
     }
     // Per channel, how far the pixel is from the background toward white or black, as a share of the room there is.
     float3 up = (c - b) / max(1 - b, 1e-4);
-    float3 down = (b - c) / max(b, 1e-4);
+    // Darker than the background only shows at half strength: a border or shadow a shade darker than the background
+    // was subtle on the solid background, and at full strength it turns into a hard black line over bright glass.
+    float3 down = 0.5 * (b - c) / max(b, 1e-4);
     float3 need = max(max(up, down), 0);
     float alpha = saturate(max(max(need.r, need.g), max(need.b, Floor)));
     // Premultiplied foreground: the pixel minus the background's remaining share.

@@ -123,7 +123,7 @@ internal static class AppDiagnosisService
         var backdrop = BackdropOf(window);
 
         if (elevated) notes.Add("Runs as administrator: Windows blocks a normal GlassForge from styling it.");
-        if (packaged) notes.Add("Store/MSIX package: it can't be relaunched with the DXGI hook.");
+        if (packaged) notes.Add("Store/MSIX package: the DXGI glass reaches it through the package's launch settings.");
         if (ownTitleBar) notes.Add("Draws its own title bar, so frame-only glass has nothing to show through.");
         if (children.Contains("Intermediate D3D Window")) notes.Add("Chromium draws it in a separate GPU process.");
         if (modules.Contains("windhawk.dll")) notes.Add("Windhawk is loaded into it; its mods may fight GlassForge.");
@@ -169,11 +169,12 @@ internal static class AppDiagnosisService
         var ownBackdrop = backdrop is "Mica" or "Mica Alt" || (backdrop == "Acrylic" && !(profile.Enabled && profile.Mode == GlassMode.Native));
         if (ownBackdrop && !chromium)
             return (GlassRoute.NativeWholeWindow, "It already asks Windows for a backdrop and leaves its background clear, so live Acrylic can replace it.");
-        if (direct3D && !packaged && !framework.StartsWith("WebView2", StringComparison.Ordinal))
-            return (GlassRoute.ExperimentalDxgi, $"{framework} paints every pixel with Direct3D; only the experimental DXGI glass reaches inside (tested on Qt). Needs an app restart.");
+        // WebView2 is left out: its GPU process is started by msedgewebview2.exe, one level further than the hook follows.
+        if (direct3D && !framework.StartsWith("WebView2", StringComparison.Ordinal))
+            return (GlassRoute.ExperimentalDxgi, $"{framework} paints every pixel with Direct3D; only the experimental DXGI glass reaches inside (tested on Qt and Electron{(packaged ? ", Store apps through their package's launch settings" : "")}). Needs an app restart.");
         if (direct3D || chromium)
             return (GlassRoute.Overlay, packaged
-                ? "It paints every pixel and is a Store package, so neither Native nor the DXGI hook reach inside; Overlay makes the whole window translucent."
+                ? "It paints every pixel in WebView2, whose GPU process the DXGI hook doesn't reach yet; Overlay makes the whole window translucent."
                 : "It paints every pixel; Overlay makes the whole window translucent over glass.");
         if (!ownTitleBar && framework is "Win32 (GDI)" or "Microsoft Office")
             return (GlassRoute.NativeFrame, "A classic GDI app with a system title bar: Native glass shows on the frame; use Overlay for the whole window.");
