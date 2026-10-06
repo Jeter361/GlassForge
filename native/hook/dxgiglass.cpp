@@ -16,6 +16,7 @@
 #include <d3dcompiler.h>
 #include <dcomp.h>
 #include <dwmapi.h>
+#include <shlwapi.h>
 #include <cstdlib>
 #include <algorithm>
 #include <vector>
@@ -734,9 +735,14 @@ float4 PS(float4 position : SV_Position) : SV_Target
     CreateProcessWFn Real_CreateProcessW = CreateProcessW;
     CreateProcessAsUserWFn Real_CreateProcessAsUserW = CreateProcessAsUserW;
 
+    // Children that get the hook at birth: Chromium's GPU process (where the frames are drawn), and a WebView2
+    // browser process (msedgewebview2.exe without --type=), which in turn hands the hook to its own GPU process - the
+    // extra step WebView2 apps such as Teams take.
     bool IsGpuProcess(LPCWSTR commandLine)
     {
-        return commandLine && wcsstr(commandLine, L"--type=gpu-process");
+        if (!commandLine) return false;
+        if (wcsstr(commandLine, L"--type=gpu-process")) return true;
+        return StrStrIW(commandLine, L"msedgewebview2.exe") && !wcsstr(commandLine, L"--type=");
     }
 
     void InjectChild(const PROCESS_INFORMATION* process, bool resume)
@@ -838,6 +844,8 @@ bool DxgiGlassRequested()
     wchar_t path[MAX_PATH]{};
     GetModuleFileNameW(nullptr, path, MAX_PATH);
     const wchar_t* name = wcsrchr(path, L'\\');
+    // WebView2 only ever has the hook because a listed app handed it down (IsGpuProcess), so it is always on there.
+    if (_wcsicmp(name ? name + 1 : path, L"msedgewebview2.exe") == 0) return true;
     return InList(list, name ? name + 1 : path);
 }
 

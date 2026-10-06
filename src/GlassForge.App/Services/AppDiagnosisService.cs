@@ -169,9 +169,9 @@ internal static class AppDiagnosisService
         var ownBackdrop = backdrop is "Mica" or "Mica Alt" || (backdrop == "Acrylic" && !(profile.Enabled && profile.Mode == GlassMode.Native));
         if (ownBackdrop && !chromium)
             return (GlassRoute.NativeWholeWindow, "It already asks Windows for a backdrop and leaves its background clear, so live Acrylic can replace it.");
-        // WebView2 is left out: its GPU process is started by msedgewebview2.exe, one level further than the hook follows.
-        if (direct3D && !framework.StartsWith("WebView2", StringComparison.Ordinal))
-            return (GlassRoute.ExperimentalDxgi, $"{framework} paints every pixel with Direct3D; only the experimental DXGI glass reaches inside (tested on Qt and Electron{(packaged ? ", Store apps through their package's launch settings" : "")}). Needs an app restart.");
+        // WebView2 included: the hook follows the app's msedgewebview2.exe browser process to its GPU process.
+        if (direct3D)
+            return (GlassRoute.ExperimentalDxgi, $"{framework} paints every pixel with Direct3D; only the experimental DXGI glass reaches inside (tested on Qt, Electron and WebView2{(packaged ? ", Store apps through their package's launch settings" : "")}). Needs an app restart.");
         if (direct3D || chromium)
             return (GlassRoute.Overlay, packaged
                 ? "It paints every pixel in WebView2, whose GPU process the DXGI hook doesn't reach yet; Overlay makes the whole window translucent."
