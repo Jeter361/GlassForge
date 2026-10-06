@@ -1,3 +1,5 @@
 EXPORTS
     DllGetClassObject PRIVATE
     DllCanUnloadNow PRIVATE
+    DetourFinishHelperProcess @1 NONAME
+    LaunchWithGlassW

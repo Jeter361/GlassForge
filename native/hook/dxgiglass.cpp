@@ -1,0 +1,465 @@
+// Experimental glass for apps that draw with DXGI (Chromium/Electron, Qt Quick/RHI, Flutter, most modern apps).
+//
+// These apps paint their own solid background color into a swap chain, so no backdrop brush can be swapped (the
+// Office/Settings route) and no GDI fill can be redrawn (the Explorer route). Instead, every frame, just before the
+// app presents it, the frame goes through "color-to-alpha": each pixel is split into the app's background color and
+// the least-transparent foreground that, laid over that color, gives the same pixel. The background part becomes
+// transparency, so DWM's backdrop shows through, and anti-aliased text keeps clean edges because only exactly the
+// background's share of each pixel is removed. Output is premultiplied, which DWM reads correctly with HDR on too.
+//
+// Present and Present1 are detoured once for the whole process (their addresses come from a throwaway swap chain),
+// so swap chains created before the hook arrived are covered. The pass runs in its own ID3DDeviceContextState, so
+// none of the app's pipeline state is touched.
+#include "dxgiglass.h"
+#include <dxgi1_2.h>
+#include <d3d11_1.h>
+#include <d3dcompiler.h>
+#include <dcomp.h>
+#include <algorithm>
+#include <vector>
+#include <wrl/client.h>
+#include <map>
+#include <string>
+#include "detours.h"
+#include "log.h"
+
+using Microsoft::WRL::ComPtr;
+
+namespace
+{
+    using PresentFn = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain*, UINT, UINT);
+    using Present1Fn = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain1*, UINT, UINT, const DXGI_PRESENT_PARAMETERS*);
+    using CreateForHwndFn = HRESULT(STDMETHODCALLTYPE*)(IDXGIFactory2*, IUnknown*, HWND, const DXGI_SWAP_CHAIN_DESC1*,
+        const DXGI_SWAP_CHAIN_FULLSCREEN_DESC*, IDXGIOutput*, IDXGISwapChain1**);
+    using CreateLegacyFn = HRESULT(STDMETHODCALLTYPE*)(IDXGIFactory*, IUnknown*, DXGI_SWAP_CHAIN_DESC*, IDXGISwapChain**);
+    using CreateForCompositionFn = HRESULT(STDMETHODCALLTYPE*)(IDXGIFactory2*, IUnknown*, const DXGI_SWAP_CHAIN_DESC1*, IDXGIOutput*, IDXGISwapChain1**);
+    PresentFn Real_Present = nullptr;
+    Present1Fn Real_Present1 = nullptr;
+    CreateForHwndFn Real_CreateSwapChainForHwnd = nullptr;
+    CreateLegacyFn Real_CreateSwapChain = nullptr;
+    CreateForCompositionFn Real_CreateSwapChainForComposition = nullptr;
+
+    // A window-bound swap chain's alpha is ignored by DWM, so the frame can't show the backdrop. Swap chains the app
+    // creates for a window are made for composition instead and shown on the same window through DirectComposition,
+    // which honors premultiplied alpha. These keep the composition trees alive for the life of the process.
+    struct WindowVisual
+    {
+        ComPtr<IDCompositionDesktopDevice> device;
+        ComPtr<IDCompositionTarget> target;
+        ComPtr<IDCompositionVisual2> visual;
+    };
+    std::vector<WindowVisual> g_visuals;
+    bool g_installed = false;
+    SRWLOCK g_lock = SRWLOCK_INIT;
+
+    // How much of the background stays: 0 = fully clear, 1 = untouched. A little keeps text readable on busy wallpaper.
+    constexpr float BackgroundFloor = 0.55f;
+    // When to look for the background color: a few times early (apps show a splash screen in a different color first),
+    // then every 600 frames in case the app switches theme.
+    bool DetectNow(unsigned frame) { return frame == 0 || frame == 30 || frame == 120 || frame == 300 || frame % 600 == 0; }
+
+    constexpr char ShaderSource[] = R"(
+cbuffer Params : register(b0) { float3 Background; float Floor; };
+Texture2D<float4> Frame : register(t0);
+float4 VS(uint id : SV_VertexID) : SV_Position
+{
+    float2 uv = float2((id << 1) & 2, id & 2);
+    return float4(uv * float2(2, -2) + float2(-1, 1), 0, 1);
+}
+float4 PS(float4 position : SV_Position) : SV_Target
+{
+    float3 c = Frame.Load(int3(position.xy, 0)).rgb;
+    float3 b = Background;
+    // Per channel, how far the pixel is from the background toward white or black, as a share of the room there is.
+    float3 up = (c - b) / max(1 - b, 1e-4);
+    float3 down = (b - c) / max(b, 1e-4);
+    float3 need = max(max(up, down), 0);
+    float alpha = saturate(max(max(need.r, need.g), max(need.b, Floor)));
+    // Premultiplied foreground: the pixel minus the background's remaining share.
+    float3 rgb = clamp(c - (1 - alpha) * b, 0, alpha);
+    return float4(rgb, alpha);
+}
+)";
+
+    ComPtr<ID3DBlob> g_vsCode, g_psCode;
+
+    struct DeviceResources
+    {
+        ComPtr<ID3D11VertexShader> vs;
+        ComPtr<ID3D11PixelShader> ps;
+        ComPtr<ID3D11Buffer> params;
+        ComPtr<ID3D11BlendState> noBlend;
+        ComPtr<ID3DDeviceContextState> state;
+        bool ok = false;
+    };
+
+    struct ChainResources
+    {
+        ComPtr<ID3D11Texture2D> copy;
+        ComPtr<ID3D11ShaderResourceView> copyView;
+        UINT width = 0, height = 0;
+        DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
+        float background[3]{};
+        bool haveBackground = false;
+        unsigned frames = 0;
+        bool logged = false;
+        bool unsupported = false;
+    };
+
+    std::map<ID3D11Device*, DeviceResources> g_devices;
+    std::map<IDXGISwapChain*, ChainResources> g_chains;
+
+    bool CompileShaders()
+    {
+        if (g_vsCode && g_psCode) return true;
+        ComPtr<ID3DBlob> errors;
+        if (FAILED(D3DCompile(ShaderSource, sizeof ShaderSource - 1, "glass", nullptr, nullptr, "VS", "vs_4_0", 0, 0, &g_vsCode, &errors)) ||
+            FAILED(D3DCompile(ShaderSource, sizeof ShaderSource - 1, "glass", nullptr, nullptr, "PS", "ps_4_0", 0, 0, &g_psCode, &errors)))
+        {
+            Log(L"dxgi: shader compile failed: %S", errors ? static_cast<const char*>(errors->GetBufferPointer()) : "?");
+            return false;
+        }
+        return true;
+    }
+
+    DeviceResources& ResourcesFor(ID3D11Device* device)
+    {
+        auto [it, added] = g_devices.try_emplace(device);
+        auto& r = it->second;
+        if (!added) return r;
+        ComPtr<ID3D11Device1> device1;
+        if (!CompileShaders() || FAILED(device->QueryInterface(IID_PPV_ARGS(&device1)))) return r;
+        const D3D_FEATURE_LEVEL level = device->GetFeatureLevel();
+        const UINT flags = (device->GetCreationFlags() & D3D11_CREATE_DEVICE_SINGLETHREADED) ? D3D11_1_CREATE_DEVICE_CONTEXT_STATE_SINGLETHREADED : 0;
+        D3D11_BUFFER_DESC params{ 16, D3D11_USAGE_DEFAULT, D3D11_BIND_CONSTANT_BUFFER };
+        D3D11_BLEND_DESC blend{};
+        blend.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+        r.ok = SUCCEEDED(device1->CreateDeviceContextState(flags, &level, 1, D3D11_SDK_VERSION, __uuidof(ID3D11Device1), nullptr, &r.state))
+            && SUCCEEDED(device->CreateVertexShader(g_vsCode->GetBufferPointer(), g_vsCode->GetBufferSize(), nullptr, &r.vs))
+            && SUCCEEDED(device->CreatePixelShader(g_psCode->GetBufferPointer(), g_psCode->GetBufferSize(), nullptr, &r.ps))
+            && SUCCEEDED(device->CreateBuffer(&params, nullptr, &r.params))
+            && SUCCEEDED(device->CreateBlendState(&blend, &r.noBlend));
+        Log(L"dxgi: device %p (feature level %X) resources %s", device, level, r.ok ? L"ready" : L"FAILED");
+        return r;
+    }
+
+    bool Is8Bit(DXGI_FORMAT format)
+    {
+        return format == DXGI_FORMAT_B8G8R8A8_UNORM || format == DXGI_FORMAT_R8G8B8A8_UNORM;
+    }
+
+    // The background is the most common color on a coarse grid of the untouched frame.
+    void DetectBackground(ID3D11Device* device, ID3D11DeviceContext* context, ID3D11Texture2D* frame, ChainResources& chain)
+    {
+        D3D11_TEXTURE2D_DESC desc{};
+        frame->GetDesc(&desc);
+        desc.BindFlags = 0;
+        desc.MiscFlags = 0;
+        desc.Usage = D3D11_USAGE_STAGING;
+        desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        ComPtr<ID3D11Texture2D> staging;
+        if (FAILED(device->CreateTexture2D(&desc, nullptr, &staging))) return;
+        context->CopyResource(staging.Get(), frame);
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        if (FAILED(context->Map(staging.Get(), 0, D3D11_MAP_READ, 0, &mapped))) return;
+        std::map<UINT32, unsigned> counts;
+        unsigned samples = 0;
+        for (UINT y = desc.Height / 20; y < desc.Height; y += desc.Height / 20 + 1)
+            for (UINT x = desc.Width / 20; x < desc.Width; x += desc.Width / 20 + 1)
+            {
+                const UINT32 pixel = static_cast<const UINT32*>(mapped.pData)[y * (mapped.RowPitch / 4) + x] & 0x00FFFFFF;
+                ++counts[pixel];
+                ++samples;
+            }
+        context->Unmap(staging.Get(), 0);
+        UINT32 best = 0;
+        unsigned bestCount = 0;
+        for (const auto& [pixel, count] : counts)
+            if (count > bestCount) { best = pixel; bestCount = count; }
+        if (bestCount * 4 < samples) return; // no dominant color: leave the frame alone
+        float first = (best & 0xFF) / 255.f, second = ((best >> 8) & 0xFF) / 255.f, third = ((best >> 16) & 0xFF) / 255.f;
+        const bool bgra = desc.Format == DXGI_FORMAT_B8G8R8A8_UNORM;
+        const float found[3] = { bgra ? third : first, second, bgra ? first : third };
+        const bool changed = !chain.haveBackground || found[0] != chain.background[0] || found[1] != chain.background[1] || found[2] != chain.background[2];
+        for (int i = 0; i < 3; ++i) chain.background[i] = found[i];
+        if (changed)
+            Log(L"dxgi: background #%02X%02X%02X (%u%% of samples)", int(chain.background[0] * 255 + .5f), int(chain.background[1] * 255 + .5f),
+                int(chain.background[2] * 255 + .5f), bestCount * 100 / samples);
+        chain.haveBackground = true;
+    }
+
+    void Process(IDXGISwapChain* swapChain, UINT flags)
+    {
+        if (flags & DXGI_PRESENT_TEST) return;
+        AcquireSRWLockExclusive(&g_lock);
+        auto& chain = g_chains[swapChain];
+        if (chain.unsupported) { ReleaseSRWLockExclusive(&g_lock); return; }
+        ComPtr<ID3D11Device> device;
+        ComPtr<ID3D11Texture2D> frame;
+        DXGI_SWAP_CHAIN_DESC desc{};
+        swapChain->GetDesc(&desc);
+        if (!chain.logged)
+        {
+            chain.logged = true;
+            ComPtr<IDXGISwapChain1> chain1;
+            DXGI_SWAP_CHAIN_DESC1 desc1{};
+            HWND hwnd = nullptr;
+            if (SUCCEEDED(swapChain->QueryInterface(IID_PPV_ARGS(&chain1)))) { chain1->GetDesc1(&desc1); chain1->GetHwnd(&hwnd); }
+            Log(L"dxgi: swap chain %p %ux%u format %d effect %d alpha mode %d hwnd %p", swapChain, desc.BufferDesc.Width, desc.BufferDesc.Height,
+                desc.BufferDesc.Format, desc.SwapEffect, desc1.AlphaMode, hwnd);
+        }
+        if (FAILED(swapChain->GetDevice(IID_PPV_ARGS(&device))) || !Is8Bit(desc.BufferDesc.Format) || desc.SampleDesc.Count != 1
+            || FAILED(swapChain->GetBuffer(0, IID_PPV_ARGS(&frame))))
+        {
+            Log(L"dxgi: swap chain %p unsupported (not D3D11, not 8-bit UNORM, or multisampled); left alone", swapChain);
+            chain.unsupported = true;
+            ReleaseSRWLockExclusive(&g_lock);
+            return;
+        }
+        auto& resources = ResourcesFor(device.Get());
+        ComPtr<ID3D11DeviceContext> context;
+        device->GetImmediateContext(&context);
+        ComPtr<ID3D11DeviceContext1> context1;
+        if (!resources.ok || FAILED(context.As(&context1))) { ReleaseSRWLockExclusive(&g_lock); return; }
+
+        D3D11_TEXTURE2D_DESC frameDesc{};
+        frame->GetDesc(&frameDesc);
+        if (!chain.copy || chain.width != frameDesc.Width || chain.height != frameDesc.Height || chain.format != frameDesc.Format)
+        {
+            D3D11_TEXTURE2D_DESC copyDesc = frameDesc;
+            copyDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+            copyDesc.MiscFlags = 0;
+            copyDesc.Usage = D3D11_USAGE_DEFAULT;
+            copyDesc.CPUAccessFlags = 0;
+            chain.copy.Reset();
+            chain.copyView.Reset();
+            if (FAILED(device->CreateTexture2D(&copyDesc, nullptr, &chain.copy)) || FAILED(device->CreateShaderResourceView(chain.copy.Get(), nullptr, &chain.copyView)))
+            {
+                chain.unsupported = true;
+                ReleaseSRWLockExclusive(&g_lock);
+                return;
+            }
+            chain.width = frameDesc.Width;
+            chain.height = frameDesc.Height;
+            chain.format = frameDesc.Format;
+        }
+        if (DetectNow(chain.frames++)) DetectBackground(device.Get(), context.Get(), frame.Get(), chain);
+        if (!chain.haveBackground) { ReleaseSRWLockExclusive(&g_lock); return; }
+
+        ComPtr<ID3D11RenderTargetView> target;
+        if (FAILED(device->CreateRenderTargetView(frame.Get(), nullptr, &target))) { chain.unsupported = true; ReleaseSRWLockExclusive(&g_lock); return; }
+        context->CopyResource(chain.copy.Get(), frame.Get());
+        const float params[4] = { chain.background[0], chain.background[1], chain.background[2], BackgroundFloor };
+
+        ComPtr<ID3DDeviceContextState> previous;
+        context1->SwapDeviceContextState(resources.state.Get(), &previous);
+        context->UpdateSubresource(resources.params.Get(), 0, nullptr, params, 0, 0);
+        const D3D11_VIEWPORT viewport{ 0, 0, float(frameDesc.Width), float(frameDesc.Height), 0, 1 };
+        context->RSSetViewports(1, &viewport);
+        context->OMSetRenderTargets(1, target.GetAddressOf(), nullptr);
+        context->OMSetBlendState(resources.noBlend.Get(), nullptr, 0xFFFFFFFF);
+        context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        context->VSSetShader(resources.vs.Get(), nullptr, 0);
+        context->PSSetShader(resources.ps.Get(), nullptr, 0);
+        context->PSSetShaderResources(0, 1, chain.copyView.GetAddressOf());
+        context->PSSetConstantBuffers(0, 1, resources.params.GetAddressOf());
+        context->Draw(3, 0);
+        ID3D11ShaderResourceView* none = nullptr;
+        context->PSSetShaderResources(0, 1, &none);
+        context->OMSetRenderTargets(0, nullptr, nullptr);
+        context1->SwapDeviceContextState(previous.Get(), nullptr);
+        ReleaseSRWLockExclusive(&g_lock);
+    }
+
+    HRESULT STDMETHODCALLTYPE Hook_Present(IDXGISwapChain* swapChain, UINT sync, UINT flags)
+    {
+        Process(swapChain, flags);
+        return Real_Present(swapChain, sync, flags);
+    }
+
+    HRESULT STDMETHODCALLTYPE Hook_Present1(IDXGISwapChain1* swapChain, UINT sync, UINT flags, const DXGI_PRESENT_PARAMETERS* parameters)
+    {
+        Process(swapChain, flags);
+        return Real_Present1(swapChain, sync, flags, parameters);
+    }
+
+    bool ComposableFormat(DXGI_FORMAT format)
+    {
+        return format == DXGI_FORMAT_B8G8R8A8_UNORM || format == DXGI_FORMAT_R8G8B8A8_UNORM || format == DXGI_FORMAT_R16G16B16A16_FLOAT
+            || format == DXGI_FORMAT_R10G10B10A2_UNORM;
+    }
+
+    bool ShowOnWindow(HWND window, IDXGISwapChain1* chain)
+    {
+        WindowVisual tree;
+        if (FAILED(DCompositionCreateDevice2(nullptr, IID_PPV_ARGS(&tree.device))) || FAILED(tree.device->CreateTargetForHwnd(window, TRUE, &tree.target))
+            || FAILED(tree.device->CreateVisual(&tree.visual)) || FAILED(tree.visual->SetContent(chain)) || FAILED(tree.target->SetRoot(tree.visual.Get()))
+            || FAILED(tree.device->Commit()))
+            return false;
+        g_visuals.push_back(std::move(tree));
+        return true;
+    }
+
+    // Makes the composition twin of a window swap chain; false leaves the app's own request untouched.
+    bool CreateComposed(IDXGIFactory2* factory, IUnknown* device, HWND window, DXGI_SWAP_CHAIN_DESC1 desc, IDXGISwapChain1** chain)
+    {
+        if (!window || desc.SampleDesc.Count != 1 || !ComposableFormat(desc.Format)) return false;
+        if (desc.Width == 0 || desc.Height == 0)
+        {
+            RECT client{};
+            GetClientRect(window, &client);
+            desc.Width = desc.Width ? desc.Width : static_cast<UINT>(std::max<LONG>(client.right, 8));
+            desc.Height = desc.Height ? desc.Height : static_cast<UINT>(std::max<LONG>(client.bottom, 8));
+        }
+        if (desc.SwapEffect != DXGI_SWAP_EFFECT_FLIP_DISCARD && desc.SwapEffect != DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL)
+            desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+        desc.BufferCount = std::max<UINT>(desc.BufferCount, 2);
+        desc.Scaling = DXGI_SCALING_STRETCH;
+        desc.AlphaMode = DXGI_ALPHA_MODE_PREMULTIPLIED;
+        desc.Flags &= ~static_cast<UINT>(DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH);
+        ComPtr<IDXGISwapChain1> composed;
+        const HRESULT created = Real_CreateSwapChainForComposition(factory, device, &desc, nullptr, &composed);
+        if (FAILED(created) || !ShowOnWindow(window, composed.Get()))
+        {
+            Log(L"dxgi: composition swap chain for %p failed (%08X); using the app's own", window, created);
+            return false;
+        }
+        Log(L"dxgi: window %p now shows a composition swap chain %p (%ux%u format %d)", window, composed.Get(), desc.Width, desc.Height, desc.Format);
+        *chain = composed.Detach();
+        return true;
+    }
+
+    HRESULT STDMETHODCALLTYPE Hook_CreateSwapChainForHwnd(IDXGIFactory2* factory, IUnknown* device, HWND window, const DXGI_SWAP_CHAIN_DESC1* desc,
+        const DXGI_SWAP_CHAIN_FULLSCREEN_DESC* fullscreen, IDXGIOutput* output, IDXGISwapChain1** chain)
+    {
+        if (desc && chain && (!fullscreen || fullscreen->Windowed) && CreateComposed(factory, device, window, *desc, chain)) return S_OK;
+        return Real_CreateSwapChainForHwnd(factory, device, window, desc, fullscreen, output, chain);
+    }
+
+    HRESULT STDMETHODCALLTYPE Hook_CreateSwapChain(IDXGIFactory* factory, IUnknown* device, DXGI_SWAP_CHAIN_DESC* desc, IDXGISwapChain** chain)
+    {
+        ComPtr<IDXGIFactory2> factory2;
+        if (desc && chain && desc->Windowed && SUCCEEDED(factory->QueryInterface(IID_PPV_ARGS(&factory2))))
+        {
+            const DXGI_SWAP_CHAIN_DESC1 desc1{ desc->BufferDesc.Width, desc->BufferDesc.Height, desc->BufferDesc.Format, FALSE, desc->SampleDesc,
+                desc->BufferUsage, desc->BufferCount, DXGI_SCALING_STRETCH, desc->SwapEffect, DXGI_ALPHA_MODE_PREMULTIPLIED, desc->Flags };
+            IDXGISwapChain1* composed = nullptr;
+            if (CreateComposed(factory2.Get(), device, desc->OutputWindow, desc1, &composed)) { *chain = composed; return S_OK; }
+        }
+        return Real_CreateSwapChain(factory, device, desc, chain);
+    }
+
+    // Present/Present1 live in dxgi.dll and are shared by every swap chain, so one throwaway chain gives their addresses.
+    bool FindPresent()
+    {
+        ComPtr<ID3D11Device> device;
+        if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0, D3D11_SDK_VERSION, &device, nullptr, nullptr)))
+            return false;
+        ComPtr<IDXGIDevice> dxgiDevice;
+        ComPtr<IDXGIAdapter> adapter;
+        ComPtr<IDXGIFactory2> factory;
+        if (FAILED(device.As(&dxgiDevice)) || FAILED(dxgiDevice->GetAdapter(&adapter)) || FAILED(adapter->GetParent(IID_PPV_ARGS(&factory)))) return false;
+        DXGI_SWAP_CHAIN_DESC1 desc{ 16, 16, DXGI_FORMAT_B8G8R8A8_UNORM, FALSE, { 1, 0 }, DXGI_USAGE_RENDER_TARGET_OUTPUT, 2, DXGI_SCALING_STRETCH,
+            DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_ALPHA_MODE_PREMULTIPLIED, 0 };
+        ComPtr<IDXGISwapChain1> chain;
+        if (FAILED(factory->CreateSwapChainForComposition(device.Get(), &desc, nullptr, &chain))) return false;
+        void** table = *reinterpret_cast<void***>(chain.Get());
+        Real_Present = reinterpret_cast<PresentFn>(table[8]);
+        Real_Present1 = reinterpret_cast<Present1Fn>(table[22]);
+        void** factoryTable = *reinterpret_cast<void***>(factory.Get());
+        Real_CreateSwapChain = reinterpret_cast<CreateLegacyFn>(factoryTable[10]);
+        Real_CreateSwapChainForHwnd = reinterpret_cast<CreateForHwndFn>(factoryTable[15]);
+        Real_CreateSwapChainForComposition = reinterpret_cast<CreateForCompositionFn>(factoryTable[24]);
+        return true;
+    }
+
+    bool InList(const wchar_t* file, const wchar_t* exe)
+    {
+        HANDLE handle = CreateFileW(file, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr);
+        if (handle == INVALID_HANDLE_VALUE) return false;
+        char buffer[4096]{};
+        DWORD read = 0;
+        ReadFile(handle, buffer, sizeof buffer - 1, &read, nullptr);
+        CloseHandle(handle);
+        wchar_t text[4096]{};
+        MultiByteToWideChar(CP_UTF8, 0, buffer, -1, text, _countof(text));
+        wchar_t* context = nullptr;
+        for (wchar_t* line = wcstok_s(text, L"\r\n", &context); line; line = wcstok_s(nullptr, L"\r\n", &context))
+            if (_wcsicmp(line, exe) == 0) return true;
+        return false;
+    }
+}
+
+bool DxgiGlassRequested()
+{
+    wchar_t list[MAX_PATH]{};
+    if (!GetEnvironmentVariableW(L"LOCALAPPDATA", list, MAX_PATH)) return false;
+    wcscat_s(list, L"\\GlassForge\\dxgi.txt");
+    wchar_t path[MAX_PATH]{};
+    GetModuleFileNameW(nullptr, path, MAX_PATH);
+    const wchar_t* name = wcsrchr(path, L'\\');
+    return InList(list, name ? name + 1 : path);
+}
+
+void InstallDxgiGlass()
+{
+    AcquireSRWLockExclusive(&g_lock);
+    if (!g_installed && FindPresent())
+    {
+        DetourTransactionBegin();
+        DetourUpdateThread(GetCurrentThread());
+        DetourAttach(reinterpret_cast<PVOID*>(&Real_Present), reinterpret_cast<PVOID>(Hook_Present));
+        DetourAttach(reinterpret_cast<PVOID*>(&Real_Present1), reinterpret_cast<PVOID>(Hook_Present1));
+        DetourAttach(reinterpret_cast<PVOID*>(&Real_CreateSwapChain), reinterpret_cast<PVOID>(Hook_CreateSwapChain));
+        DetourAttach(reinterpret_cast<PVOID*>(&Real_CreateSwapChainForHwnd), reinterpret_cast<PVOID>(Hook_CreateSwapChainForHwnd));
+        const LONG result = DetourTransactionCommit();
+        g_installed = result == NO_ERROR;
+        Log(L"dxgi: present and swap chain detours %s (%ld)", g_installed ? L"installed" : L"FAILED", result);
+    }
+    ReleaseSRWLockExclusive(&g_lock);
+}
+
+void RemoveDxgiGlass()
+{
+    AcquireSRWLockExclusive(&g_lock);
+    if (g_installed)
+    {
+        DetourTransactionBegin();
+        DetourUpdateThread(GetCurrentThread());
+        DetourDetach(reinterpret_cast<PVOID*>(&Real_Present), reinterpret_cast<PVOID>(Hook_Present));
+        DetourDetach(reinterpret_cast<PVOID*>(&Real_Present1), reinterpret_cast<PVOID>(Hook_Present1));
+        DetourDetach(reinterpret_cast<PVOID*>(&Real_CreateSwapChain), reinterpret_cast<PVOID>(Hook_CreateSwapChain));
+        DetourDetach(reinterpret_cast<PVOID*>(&Real_CreateSwapChainForHwnd), reinterpret_cast<PVOID>(Hook_CreateSwapChainForHwnd));
+        g_installed = DetourTransactionCommit() != NO_ERROR;
+        g_chains.clear();
+        g_devices.clear();
+        Log(L"dxgi: present detours removed");
+    }
+    ReleaseSRWLockExclusive(&g_lock);
+}
+
+// Started from DllMain when the hook is in the process from launch: the swap chain substitution only helps if it is in
+// place before the app makes its first swap chain. DllMain holds the loader lock, so the setup runs on its own thread.
+void StartDxgiGlassEarly()
+{
+    if (HANDLE thread = CreateThread(nullptr, 0, [](void*) -> DWORD { InstallDxgiGlass(); return 0; }, nullptr, 0, nullptr))
+        CloseHandle(thread);
+}
+
+// rundll32 GlassForge.Hook.dll,LaunchWithGlass <command line>: starts an app with the hook loaded from its first
+// instruction (Detours rewrites the new process's import table), for apps whose swap chain must be caught at creation.
+extern "C" void CALLBACK LaunchWithGlassW(HWND, HINSTANCE, LPWSTR commandLine, int show)
+{
+    char dll[MAX_PATH]{};
+    HMODULE self = nullptr;
+    GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+        reinterpret_cast<LPCWSTR>(&LaunchWithGlassW), &self);
+    GetModuleFileNameA(self, dll, MAX_PATH);
+    STARTUPINFOW startup{ sizeof startup };
+    startup.dwFlags = STARTF_USESHOWWINDOW;
+    startup.wShowWindow = static_cast<WORD>(show);
+    PROCESS_INFORMATION process{};
+    const BOOL ok = DetourCreateProcessWithDllExW(nullptr, commandLine, nullptr, nullptr, FALSE, 0, nullptr, nullptr, &startup, &process, dll, nullptr);
+    Log(L"launch with glass: %s -> %s (pid %lu)", commandLine, ok ? L"started" : L"FAILED", process.dwProcessId);
+    if (ok) { CloseHandle(process.hThread); CloseHandle(process.hProcess); }
+}

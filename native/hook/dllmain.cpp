@@ -22,6 +22,7 @@
 #include "xaml.h"
 #include "uwp.h"
 #include "office.h"
+#include "dxgiglass.h"
 
 namespace
 {
@@ -831,6 +832,9 @@ extern "C" __declspec(dllexport) LRESULT CALLBACK GlassForgeGetMessageProc(int c
         if (!t_root && !t_detached && message->hwnd)
         {
             const HWND root = GetAncestor(message->hwnd, GA_ROOT);
+            // Experimental: any app that presents with DXGI, listed in dxgi.txt (dxgiglass.cpp). Process-wide, so once is enough.
+            static const bool dxgi = DxgiGlassRequested();
+            if (dxgi) InstallDxgiGlass();
             wchar_t name[64]{};
             GetClassNameW(root, name, _countof(name));
             // Office (Word, Excel, PowerPoint): Office's wallpaper brushes become live glass (office.cpp). Any window
@@ -862,6 +866,7 @@ extern "C" __declspec(dllexport) LRESULT CALLBACK GlassForgeGetMessageProc(int c
         else if (message->message == g_detachMessage)
         {
             t_detached = true;
+            RemoveDxgiGlass();
             ReleaseOfficeWindows();
             t_officeRoot = nullptr;
             if (IsOfficeProcess()) DisableOfficeGlass();
@@ -880,12 +885,14 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID)
         DisableThreadLibraryCalls(module);
         Log(L"loaded");
         if (IsOfficeProcess()) StartOfficeHooksEarly();
+        if (DxgiGlassRequested()) StartDxgiGlassEarly();
         break;
     case DLL_PROCESS_DETACH:
         // Never leave detours (or a redirected UWP method) pointing into an unloaded DLL; GlassForge normally sends
         // Detach first.
         UndoUwpRedirect();
         RemoveOfficeHooks();
+        RemoveDxgiGlass();
         Uninstall();
         Log(L"unloaded");
         break;
