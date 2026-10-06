@@ -59,7 +59,7 @@ namespace
     bool DetectNow(unsigned frame) { return frame == 0 || frame == 30 || frame == 120 || frame == 300 || frame % 600 == 0; }
 
     constexpr char ShaderSource[] = R"(
-cbuffer Params : register(b0) { float3 Background; float Floor; uint KeepCount; uint3 Padding; int4 Keep[8]; };
+cbuffer Params : register(b0) { float3 Background; float Floor; uint KeepCount; uint ClearCount; uint2 Padding; int4 Keep[8]; int4 Clear[8]; };
 Texture2D<float4> Frame : register(t0);
 float4 VS(uint id : SV_VertexID) : SV_Position
 {
@@ -72,6 +72,10 @@ float4 PS(float4 position : SV_Position) : SV_Target
     // Areas left exactly as the app drew them (a remote desktop view, a video), fully solid.
     for (uint i = 0; i < KeepCount; ++i)
         if (position.x >= Keep[i].x && position.y >= Keep[i].y && position.x < Keep[i].z && position.y < Keep[i].w) return float4(c, 1);
+    // What trimming cut off those areas (letterbox bars, which are darker than the background and so can't be
+    // color-to-alpha'd away) shows as plain glass with the usual tint.
+    for (uint j = 0; j < ClearCount; ++j)
+        if (position.x >= Clear[j].x && position.y >= Clear[j].y && position.x < Clear[j].z && position.y < Clear[j].w) return float4(Background * Floor, Floor);
     float3 b = Background;
     // Per channel, how far the pixel is from the background toward white or black, as a share of the room there is.
     float3 up = (c - b) / max(1 - b, 1e-4);
@@ -98,10 +102,12 @@ float4 PS(float4 position : SV_Position) : SV_Target
         float background[3];
         float floor;
         UINT32 keepCount;
-        UINT32 padding[3];
+        UINT32 clearCount;
+        UINT32 padding[2];
         INT32 keep[8][4];
+        INT32 clear[8][4];
     };
-    static_assert(sizeof(Params) == 160);
+    static_assert(sizeof(Params) == 288);
     HANDLE g_keepMapping = nullptr;
     const KeepAreas* g_keepView = nullptr;
     unsigned g_keepRetry = 0;
@@ -151,10 +157,121 @@ float4 PS(float4 position : SV_Position) : SV_Target
         unsigned frames = 0;
         bool logged = false;
         bool unsupported = false;
+        // Letterbox trimming of the keep-solid areas: a video shown "contained" (LogMeIn's remote screen) has black
+        // bars that belong to the same element. A copy of the areas is read back without stalling, and each area
+        // shrinks to its rows and columns that aren't pure black.
+        ComPtr<ID3D11Texture2D> trimStaging;
+        RECT trimSource[8]{};
+        RECT trimmed[8]{};
+        UINT32 trimCount = 0;
+        RECT pendingSource[8]{};
+        UINT32 pendingCount = 0;
+        bool trimPending = false;
+        unsigned trimAge = 0;
     };
 
     std::map<ID3D11Device*, DeviceResources> g_devices;
     std::map<IDXGISwapChain*, ChainResources> g_chains;
+
+    bool SameRects(const RECT* a, const RECT* b, UINT32 count)
+    {
+        for (UINT32 i = 0; i < count; ++i)
+            if (!EqualRect(&a[i], &b[i])) return false;
+        return true;
+    }
+
+    // Shrinks one area to the bounding box of its pixels that aren't (near) pure black; empty when it is all black.
+    RECT TrimBlack(const D3D11_MAPPED_SUBRESOURCE& mapped, RECT area)
+    {
+        constexpr BYTE Black = 6;
+        auto lit = [&](LONG x, LONG y) {
+            const BYTE* pixel = static_cast<const BYTE*>(mapped.pData) + y * mapped.RowPitch + x * 4;
+            return pixel[0] > Black || pixel[1] > Black || pixel[2] > Black;
+        };
+        auto rowLit = [&](LONG y) { for (LONG x = area.left; x < area.right; ++x) if (lit(x, y)) return true; return false; };
+        auto columnLit = [&](LONG x, LONG top, LONG bottom) { for (LONG y = top; y < bottom; ++y) if (lit(x, y)) return true; return false; };
+        RECT result = area;
+        while (result.top < result.bottom && !rowLit(result.top)) ++result.top;
+        while (result.bottom > result.top && !rowLit(result.bottom - 1)) --result.bottom;
+        if (result.top >= result.bottom) return RECT{};
+        while (result.left < result.right && !columnLit(result.left, result.top, result.bottom)) ++result.left;
+        while (result.right > result.left && !columnLit(result.right - 1, result.top, result.bottom)) --result.right;
+        return result;
+    }
+
+    // Starts a read-back when the areas changed (or every ~half second), finishes it once the GPU is done, and swaps
+    // the published areas for their trimmed versions when those were measured for exactly these areas.
+    void TrimKeepAreas(ID3D11Device* device, ID3D11DeviceContext* context, ID3D11Texture2D* frame, ChainResources& chain, Params& params)
+    {
+        if (params.keepCount == 0) return;
+        RECT areas[8]{};
+        D3D11_TEXTURE2D_DESC desc{};
+        frame->GetDesc(&desc);
+        for (UINT32 i = 0; i < params.keepCount; ++i)
+        {
+            areas[i] = { std::clamp<LONG>(params.keep[i][0], 0, desc.Width), std::clamp<LONG>(params.keep[i][1], 0, desc.Height),
+                std::clamp<LONG>(params.keep[i][2], 0, desc.Width), std::clamp<LONG>(params.keep[i][3], 0, desc.Height) };
+        }
+        if (chain.trimPending)
+        {
+            D3D11_MAPPED_SUBRESOURCE mapped{};
+            if (context->Map(chain.trimStaging.Get(), 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &mapped) == S_OK)
+            {
+                for (UINT32 i = 0; i < chain.pendingCount; ++i) chain.trimmed[i] = TrimBlack(mapped, chain.pendingSource[i]);
+                context->Unmap(chain.trimStaging.Get(), 0);
+                std::copy_n(chain.pendingSource, chain.pendingCount, chain.trimSource);
+                chain.trimCount = chain.pendingCount;
+                chain.trimPending = false;
+            }
+        }
+        const bool current = chain.trimCount == params.keepCount && SameRects(areas, chain.trimSource, params.keepCount);
+        if (!chain.trimPending && (!current || ++chain.trimAge >= 30))
+        {
+            chain.trimAge = 0;
+            D3D11_TEXTURE2D_DESC stagingDesc{};
+            if (chain.trimStaging) chain.trimStaging->GetDesc(&stagingDesc);
+            if (!chain.trimStaging || stagingDesc.Width != desc.Width || stagingDesc.Height != desc.Height || stagingDesc.Format != desc.Format)
+            {
+                stagingDesc = desc;
+                stagingDesc.BindFlags = 0;
+                stagingDesc.MiscFlags = 0;
+                stagingDesc.Usage = D3D11_USAGE_STAGING;
+                stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+                chain.trimStaging.Reset();
+                if (FAILED(device->CreateTexture2D(&stagingDesc, nullptr, &chain.trimStaging))) return;
+            }
+            for (UINT32 i = 0; i < params.keepCount; ++i)
+            {
+                if (IsRectEmpty(&areas[i])) continue;
+                const D3D11_BOX box{ UINT(areas[i].left), UINT(areas[i].top), 0, UINT(areas[i].right), UINT(areas[i].bottom), 1 };
+                context->CopySubresourceRegion(chain.trimStaging.Get(), 0, box.left, box.top, 0, chain.copy.Get(), 0, &box);
+            }
+            std::copy_n(areas, params.keepCount, chain.pendingSource);
+            chain.pendingCount = params.keepCount;
+            chain.trimPending = true;
+        }
+        if (!current) return; // until measured, the whole published area stays solid
+        for (UINT32 i = 0; i < params.keepCount; ++i)
+        {
+            params.clear[i][0] = areas[i].left;
+            params.clear[i][1] = areas[i].top;
+            params.clear[i][2] = areas[i].right;
+            params.clear[i][3] = areas[i].bottom;
+        }
+        params.clearCount = params.keepCount;
+        UINT32 kept = 0;
+        for (UINT32 i = 0; i < params.keepCount; ++i)
+        {
+            const RECT& r = chain.trimmed[i];
+            if (IsRectEmpty(&r)) continue; // all black: nothing worth keeping solid
+            params.keep[kept][0] = r.left;
+            params.keep[kept][1] = r.top;
+            params.keep[kept][2] = r.right;
+            params.keep[kept][3] = r.bottom;
+            ++kept;
+        }
+        params.keepCount = kept;
+    }
 
     bool CompileShaders()
     {
@@ -300,6 +417,7 @@ float4 PS(float4 position : SV_Position) : SV_Target
         context->CopyResource(chain.copy.Get(), frame.Get());
         Params params{ { chain.background[0], chain.background[1], chain.background[2] }, BackgroundFloor };
         ReadKeepAreas(params);
+        TrimKeepAreas(device.Get(), context.Get(), frame.Get(), chain, params);
 
         ComPtr<ID3DDeviceContextState> previous;
         context1->SwapDeviceContextState(resources.state.Get(), &previous);

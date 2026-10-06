@@ -1,5 +1,5 @@
 # Dev tool for the experimental DXGI glass (hook/dxgiglass.cpp): finds areas of an app that must stay solid with UI
-# Automation and publishes them every second in Local\GlassForge.DxgiKeep.<pid>, where the hook reads them. By default
+# Automation and publishes them every half second in Local\GlassForge.DxgiKeep.<pid>, where the hook reads them. By default
 # that is LogMeIn Resolve's remote screen: the session page's <video> element (AutomationId ending in
 # "VideoStream_Video"), which only shows up in the raw view. Runs until the stop file appears.
 param(
@@ -42,8 +42,8 @@ $searched = [datetime]::MinValue
 while (-not (Test-Path $StopFile)) {
     $rects = @()
     try {
-        # Reuse the element while it lives; look again every 3 s when there is none (no session open).
-        if (-not $element -and ([datetime]::Now - $searched).TotalSeconds -ge 3) {
+        # Reuse the element while it lives; look again every half second when there is none, so a new session is covered fast.
+        if (-not $element -and ([datetime]::Now - $searched).TotalSeconds -ge 0.5) {
             $searched = [datetime]::Now
             $element = Find-Element ([Windows.Automation.AutomationElement]::FromHandle($window)) 0
         }
@@ -60,6 +60,6 @@ while (-not (Test-Path $StopFile)) {
     $view.Write(0, [int]$rects.Count)
     $now = ($rects | ForEach-Object { "[" + ($_ -join ",") + "]" }) -join " "
     if ($now -ne $last) { Write-Output "$(Get-Date -Format HH:mm:ss) keep: $(if ($now) { $now } else { 'none' })"; $last = $now }
-    Start-Sleep -Milliseconds 1000
+    Start-Sleep -Milliseconds 500
 }
 $view.Dispose(); $mapping.Dispose()
