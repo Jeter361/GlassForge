@@ -35,6 +35,7 @@ function Find-Element($element, [int] $depth) {
 $last = ''
 $targetId = 0
 $lastFrame = ''
+$lostAt = $null
 $mapping = $null
 $view = $null
 $element = $null
@@ -61,20 +62,28 @@ while (-not (Test-Path $StopFile)) {
     if ($frameText -ne $lastFrame) { $lastFrame = $frameText; Start-Sleep -Milliseconds 250; continue }
     $rects = @()
     try {
-        # Reuse the element while it lives; look again every half second when there is none, so a new session is covered fast.
-        if (-not $element -and ([datetime]::Now - $searched).TotalSeconds -ge 0.5) {
+        # Reuse the element while it lives; look again every half second when there is none, so a new session is covered
+        # fast, and every 3 s anyway: LogMeIn rebuilds the video element when full screen toggles, and the old one lingers.
+        $age = ([datetime]::Now - $searched).TotalSeconds
+        if ((-not $element -and $age -ge 0.5) -or $age -ge 3) {
             $searched = [datetime]::Now
             $element = Find-Element ([Windows.Automation.AutomationElement]::FromHandle($window)) 0
         }
         if ($element) {
             $r = $element.Current.BoundingRectangle
-            if (-not $r.IsEmpty -and $r.Width -ge 1) {
+            # A replaced element can stay reachable with an empty rectangle: drop it and search again at once.
+            if ($r.IsEmpty -or $r.Width -lt 1) { $element = $null; $searched = [datetime]::MinValue; $lostAt = [datetime]::Now }
+            else {
                 $origin = New-Object Ka.W+POINT
                 [void][Ka.W]::ClientToScreen($window, [ref]$origin)
                 $rects += , @([int]($r.Left - $origin.X), [int]($r.Top - $origin.Y), [int]($r.Right - $origin.X), [int]($r.Bottom - $origin.Y))
             }
         }
     } catch { $element = $null } # the session closed: the element is gone
+    # Keep publishing the last area for up to 2 s while a replaced element is looked up again, so the remote screen
+    # doesn't show through mid-transition.
+    if (-not $element -and $lostAt -and ([datetime]::Now - $lostAt).TotalSeconds -lt 2) { Start-Sleep -Milliseconds 100; continue }
+    if ($element) { $lostAt = $null }
     for ($i = 0; $i -lt $rects.Count; $i++) { for ($j = 0; $j -lt 4; $j++) { $view.Write(4 + $i * 16 + $j * 4, [int]$rects[$i][$j]) } }
     $view.Write(0, [int]$rects.Count)
     $now = ($rects | ForEach-Object { "[" + ($_ -join ",") + "]" }) -join " "
