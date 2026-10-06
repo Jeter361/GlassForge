@@ -38,6 +38,7 @@ public sealed class AppProfile : INotifyPropertyChanged
     private CornerStyle _corners;
     private TitleBarTheme _titleBar;
     private bool _keepGlassWhenUnfocused = true;
+    private bool _solidTextArea;
     private bool _explorerGlass;
     private string _executablePath = "";
     private System.Windows.Media.ImageSource? _icon;
@@ -115,6 +116,11 @@ public sealed class AppProfile : INotifyPropertyChanged
     public CornerStyle Corners { get => _corners; set => Set(ref _corners, value); }
     public TitleBarTheme TitleBar { get => _titleBar; set => Set(ref _titleBar, value); }
     public bool KeepGlassWhenUnfocused { get => _keepGlassWhenUnfocused; set => Set(ref _keepGlassWhenUnfocused, value); }
+    /// <summary>
+    /// Notepad with the frame extended: keep the text area solid and put the glass only around it. Needed with HDR on,
+    /// where Windows composes the see-through text area straight instead of additively, so the text vanishes with it.
+    /// </summary>
+    public bool SolidTextArea { get => _solidTextArea; set => Set(ref _solidTextArea, value); }
 
     [JsonIgnore] public string OpacityLabel => $"{Math.Round(WindowOpacity / 255d * 100)}%";
     [JsonIgnore] public string Initial => string.IsNullOrWhiteSpace(DisplayName) ? "?" : DisplayName.TrimStart()[..1].ToUpperInvariant();
@@ -158,6 +164,7 @@ public sealed class AppProfile : INotifyPropertyChanged
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsTerminal)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsSettings)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsOffice)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsNotepad)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(OfficeDisplayName)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(OfficeExeName)));
         }

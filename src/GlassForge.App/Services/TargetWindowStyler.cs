@@ -24,6 +24,8 @@ internal sealed class TargetWindowStyler
         internal int Corners = CornerDefault;
         internal int? DarkMode;
         internal bool Extended;
+        // Glass only around this inset instead of the whole window (Notepad's solid text area); null = whole window.
+        internal NativeMethods.Margins? Inset;
     }
 
     private readonly AppProfile _profile;
@@ -101,8 +103,19 @@ internal sealed class TargetWindowStyler
     internal void Reassert(nint window)
     {
         if (!ReassertBackdrop(window) || !_touched[window].Extended) return;
-        var margins = new NativeMethods.Margins { Left = -1, Right = -1, Top = -1, Bottom = -1 };
+        var margins = _touched[window].Inset ?? new NativeMethods.Margins { Left = -1, Right = -1, Top = -1, Bottom = -1 };
         NativeMethods.DwmExtendFrameIntoClientArea(window, ref margins);
+    }
+
+    /// <summary>
+    /// Narrows an extended window's glass to the band around <paramref name="inset"/>, leaving the middle to the app's
+    /// own (opaque) painting; null puts the whole window back. Applied at once if it changed, and kept by Reassert.
+    /// </summary>
+    internal void SetInset(nint window, NativeMethods.Margins? inset)
+    {
+        if (!_touched.TryGetValue(window, out var original) || !original.Extended || Equals(original.Inset, inset)) return;
+        original.Inset = inset;
+        Reassert(window);
     }
 
     /// <summary>

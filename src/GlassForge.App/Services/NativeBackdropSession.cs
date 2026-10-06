@@ -175,6 +175,10 @@ internal sealed class NativeBackdropWorker
 
     private bool ClearsEditors => _profile.IsNotepad && _profile.ExtendIntoClient && TargetWindowStyler.SupportsSystemBackdrop;
 
+    // With HDR on, DWM composes the cleared text area straight rather than additively, so Notepad's text (drawn with
+    // alpha 0) turns as see-through as the background. The opt-in fix leaves the text area alone and glass around it.
+    private bool KeepsEditorsSolid => ClearsEditors && _profile.SolidTextArea;
+
     // A burst of re-applies over the next 5 s: apps reset their frame (and Notepad its text area) a moment after
     // appearing or activating, often after the event that told us about it.
     private void Settle()
@@ -192,6 +196,11 @@ internal sealed class NativeBackdropWorker
     private void ClearEditorBackgrounds(nint window)
     {
         if (!ClearsEditors) return;
+        if (KeepsEditorsSolid)
+        {
+            _styler.SetInset(window, VisibleEditorInset(window));
+            return;
+        }
         NativeMethods.EnumChildWindows(window, (child, _) =>
         {
             if (!IsClass(child, NotepadEditorClass) || !SetEditorBackground(child, 0, out var previous)) return true;
@@ -202,6 +211,30 @@ internal sealed class NativeBackdropWorker
             else _editors.TryAdd(child, NotepadEditorBackground);
             return true;
         }, nint.Zero);
+    }
+
+    // The current tab's text area as distances from each client edge; the inactive tabs' controls are hidden. Null when
+    // no text area shows (Notepad's settings page), which keeps the whole window glass.
+    private static NativeMethods.Margins? VisibleEditorInset(nint window)
+    {
+        var editor = nint.Zero;
+        NativeMethods.EnumChildWindows(window, (child, _) =>
+        {
+            if (!IsClass(child, NotepadEditorClass) || !NativeMethods.IsWindowVisible(child)) return true;
+            editor = child;
+            return false;
+        }, nint.Zero);
+        if (editor == nint.Zero || !NativeMethods.GetWindowRect(editor, out var text) || !NativeMethods.GetClientRect(window, out var client))
+            return null;
+        var origin = new NativeMethods.Point();
+        NativeMethods.ClientToScreen(window, ref origin);
+        return new NativeMethods.Margins
+        {
+            Left = Math.Max(0, text.Left - origin.X),
+            Top = Math.Max(0, text.Top - origin.Y),
+            Right = Math.Max(0, client.Right - (text.Right - origin.X)),
+            Bottom = Math.Max(0, client.Bottom - (text.Bottom - origin.Y)),
+        };
     }
 
     // EM_SETBKGNDCOLOR returns the color it replaces; a hung Notepad is skipped rather than freezing this thread.

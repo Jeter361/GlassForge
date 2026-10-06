@@ -44,6 +44,13 @@ internal static class NativeMethods
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    internal struct Point
+    {
+        internal int X;
+        internal int Y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     internal struct Margins
     {
         internal int Left;
@@ -99,6 +106,8 @@ internal static class NativeMethods
     [DllImport("user32.dll")] internal static extern bool IsWindow(nint window);
     [DllImport("user32.dll")] internal static extern bool IsIconic(nint window);
     [DllImport("user32.dll")] internal static extern bool GetWindowRect(nint window, out Rect rect);
+    [DllImport("user32.dll")] internal static extern bool GetClientRect(nint window, out Rect rect);
+    [DllImport("user32.dll")] internal static extern bool ClientToScreen(nint window, ref Point point);
     [DllImport("user32.dll")] internal static extern nint MonitorFromWindow(nint window, uint flags);
     [DllImport("user32.dll")] internal static extern bool GetMonitorInfo(nint monitor, ref MonitorInfo info);
     [DllImport("user32.dll")] internal static extern uint GetWindowThreadProcessId(nint window, out uint processId);

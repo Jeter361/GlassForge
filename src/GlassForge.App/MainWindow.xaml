@@ -255,6 +255,18 @@
                     <StackPanel><TextBlock Text="Extend into the whole window" FontSize="13" /><TextBlock Text="Full-window glass for apps that leave their background clear, like Notepad and Windows Terminal. Apps that paint their own background (File Explorer's file list, Outlook, Chrome) stay solid there." FontSize="12" Foreground="{StaticResource SubtleBrush}" TextWrapping="Wrap" Margin="0,2,12,0" /></StackPanel>
                     <CheckBox Grid.Column="1" IsChecked="{Binding ExtendIntoClient}" VerticalAlignment="Center" />
                   </Grid>
+                  <!-- Notepad only: HDR turns the see-through text area's text invisible -->
+                  <Grid Margin="0,16,0,0">
+                    <Grid.Style>
+                      <Style TargetType="Grid">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                        <Style.Triggers><DataTrigger Binding="{Binding IsNotepad}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
+                      </Style>
+                    </Grid.Style>
+                    <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                    <StackPanel><TextBlock Text="Solid text area (for HDR)" FontSize="13" /><TextBlock Text="Turn this on if HDR is on and the text you type is invisible. The tabs, menu and status bar stay glass; the page you type on stays solid." FontSize="12" Foreground="{StaticResource SubtleBrush}" TextWrapping="Wrap" Margin="0,2,12,0" /></StackPanel>
+                    <CheckBox Grid.Column="1" IsChecked="{Binding SolidTextArea}" VerticalAlignment="Center" />
+                  </Grid>
                   <Grid Margin="0,16,0,0">
                     <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                     <StackPanel><TextBlock Text="Keep glass when unfocused" FontSize="13" /><TextBlock Text="Windows normally swaps the material for a flat color when you click away. This keeps the frame drawn as active, so the glass stays live." FontSize="12" Foreground="{StaticResource SubtleBrush}" TextWrapping="Wrap" Margin="0,2,12,0" /></StackPanel>
