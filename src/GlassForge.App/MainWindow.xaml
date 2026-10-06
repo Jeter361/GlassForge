@@ -197,6 +197,23 @@
                 <CheckBox Grid.Column="2" IsChecked="{Binding Enabled}" VerticalAlignment="Center" ToolTip="Glass on or off" />
               </Grid>
 
+              <!-- Smart diagnosis: looks at the running app (read-only) and recommends a route -->
+              <Button x:Name="DiagnoseButton" Style="{StaticResource GhostButton}" HorizontalAlignment="Left" Padding="6,4" Margin="-6,12,0,0" Click="DiagnoseApp" ToolTip="Look at how this app draws and pick the glass that fits (nothing is changed until you apply)">
+                <StackPanel Orientation="Horizontal">
+                  <TextBlock Style="{StaticResource Icon}" Text="&#xE9D9;" FontSize="12" Margin="0,0,8,0" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                  <TextBlock x:Name="DiagnoseLabel" Text="Diagnose this app" FontSize="12" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                </StackPanel>
+              </Button>
+              <Border x:Name="DiagnosisPanel" Visibility="Collapsed" Background="{StaticResource RaisedBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="14,12" Margin="0,8,0,0">
+                <StackPanel>
+                  <TextBlock x:Name="DiagnosisFacts" FontSize="12" Foreground="{StaticResource SubtleBrush}" TextWrapping="Wrap" />
+                  <TextBlock x:Name="DiagnosisNotes" FontSize="12" Foreground="{StaticResource SubtleBrush}" TextWrapping="Wrap" Margin="0,6,0,0" />
+                  <TextBlock x:Name="DiagnosisRoute" FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,10,0,0" />
+                  <TextBlock x:Name="DiagnosisReason" Style="{StaticResource OptionHint}" />
+                  <Button x:Name="ApplyRouteButton" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Left" Padding="14,5" Margin="0,10,0,0" FontSize="12" Click="ApplyRoute" />
+                </StackPanel>
+              </Border>
+
               <!-- Mode -->
               <Border Style="{StaticResource SegmentGroup}" Margin="0,26,0,0" HorizontalAlignment="Left">
                 <StackPanel Orientation="Horizontal">

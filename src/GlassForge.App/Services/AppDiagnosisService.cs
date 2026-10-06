@@ -73,6 +73,7 @@ internal static class AppDiagnosisService
         ("system.windows.forms.ni.dll", "WinForms"),
         ("windows.ui.xaml.dll", "System XAML (UWP)"),
         ("jvm.dll", "Java"),
+        ("xul.dll", "Firefox (Gecko)"),
     ];
 
     private const long WsExNoRedirectionBitmap = 0x00200000;
@@ -82,11 +83,18 @@ internal static class AppDiagnosisService
     {
         var notes = new List<string>();
         var window = WindowDiscoveryService.FindLargestWindow(profile.ProcessName, out var processIds);
+        // UWP apps (Settings, To Do, Calculator) own no top-level window: ApplicationFrameHost's frame holds their
+        // CoreWindow, so look for the frame whose CoreWindow belongs to the app.
+        uint hostedId = 0;
+        if (window == nint.Zero && processIds.Count > 0) window = FindHostedFrame(processIds, out hostedId);
         if (window == nint.Zero || processIds.Count == 0)
             return new AppDiagnosis("Unknown", "Unknown", false, false, false, "Unknown",
-                ["The app isn't running, or has no visible window. Open it and diagnose again."], GlassRoute.Overlay,
-                "Nothing to look at yet; Overlay works for most apps.");
+                [processIds.Count == 0
+                    ? "The app isn't running. Open it and diagnose again."
+                    : "It's running but has no visible window (minimized, or a Store app suspended in the background). Restore it and diagnose again."],
+                GlassRoute.Overlay, "Nothing to look at yet; Overlay works for most apps.");
         NativeMethods.GetWindowThreadProcessId(window, out var processId);
+        if (hostedId != 0) processId = hostedId;
 
         var elevated = IsElevated((int)processId);
         var packaged = IsPackaged((int)processId, AppIconService.ExecutablePath((int)processId));
@@ -99,7 +107,19 @@ internal static class AppDiagnosisService
         var exStyle = NativeMethods.GetWindowLongPtr(window, NativeMethods.GwlExStyle).ToInt64();
         var ownTitleBar = (style & WsCaption) != WsCaption;
         var noRedirection = (exStyle & WsExNoRedirectionBitmap) != 0;
-        var rendering = noRedirection ? "DirectComposition (no GDI surface)" : DetectRendering(window);
+        // GlassForge's own DXGI glass changes what the render test sees, so an app already running with it is reported
+        // as such instead of being re-measured through its own effect.
+        var ownGlass = modules.Any(module => module.StartsWith("glassforge.hook", StringComparison.Ordinal)) && profile.DxgiGlass;
+        var rendering = ownGlass ? "Direct3D (GlassForge's DXGI glass is active in it)"
+            : noRedirection ? "DirectComposition (no GDI surface)" : DetectRendering(window);
+        // A minimized window can't be test-captured; these stacks draw with Direct3D anyway.
+        if (rendering.StartsWith("Unknown", StringComparison.Ordinal))
+        {
+            if (NativeMethods.IsIconic(window)) notes.Add("It's minimized, so the render test couldn't run; restore it and diagnose again to be sure.");
+            var direct3DStack = framework.Contains("Chromium", StringComparison.Ordinal) || framework.StartsWith("Flutter", StringComparison.Ordinal)
+                || framework.StartsWith("Firefox", StringComparison.Ordinal) || (framework.StartsWith("Qt", StringComparison.Ordinal) && modules.Contains("d3d11.dll"));
+            if (direct3DStack) rendering = "Direct3D (inferred from the framework)";
+        }
         var backdrop = BackdropOf(window);
 
         if (elevated) notes.Add("Runs as administrator: Windows blocks a normal GlassForge from styling it.");
@@ -116,9 +136,11 @@ internal static class AppDiagnosisService
     internal static void WriteReport(IEnumerable<string> processNames)
     {
         var report = new StringBuilder();
+        var saved = new ProfileStore().Load();
         foreach (var name in processNames)
         {
-            var profile = new AppProfile { ProcessName = name };
+            var profile = saved.FirstOrDefault(p => string.Equals(p.ProcessName, name, StringComparison.OrdinalIgnoreCase))
+                ?? new AppProfile { ProcessName = name };
             var d = Diagnose(profile);
             report.AppendLine($"== {name}")
                 .AppendLine($"   framework: {d.Framework}; rendering: {d.Rendering}; backdrop: {d.Backdrop}")
@@ -156,6 +178,23 @@ internal static class AppDiagnosisService
         if (!ownTitleBar && framework is "Win32 (GDI)" or "Microsoft Office")
             return (GlassRoute.NativeFrame, "A classic GDI app with a system title bar: Native glass shows on the frame; use Overlay for the whole window.");
         return (GlassRoute.Overlay, "It paints its own background; Overlay works for any app.");
+    }
+
+    private static nint FindHostedFrame(HashSet<uint> processIds, out uint hostedId)
+    {
+        nint found = nint.Zero;
+        uint owner = 0;
+        NativeMethods.EnumWindows((frame, _) =>
+        {
+            if (!NativeMethods.IsWindowVisible(frame) || ClassOf(frame) != "ApplicationFrameWindow") return true;
+            var content = NativeMethods.FindWindowEx(frame, nint.Zero, AppProfile.UwpContentWindowClass, null);
+            if (content == nint.Zero || NativeMethods.GetWindowThreadProcessId(content, out var id) == 0 || !processIds.Contains(id)) return true;
+            found = frame;
+            owner = id;
+            return false;
+        }, nint.Zero);
+        hostedId = owner;
+        return found;
     }
 
     private static string DetectFramework(HashSet<string> modules, string className, HashSet<string> children, string? exePath)

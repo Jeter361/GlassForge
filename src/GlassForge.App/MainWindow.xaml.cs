@@ -181,9 +181,87 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void ProfileSelected(object sender, SelectionChangedEventArgs e)
     {
-        if (AdvancedPanel is null || AdvancedChevron is null) return; // the first selection lands while the XAML loads
+        if (AdvancedPanel is null || AdvancedChevron is null || DiagnosisPanel is null) return; // the first selection lands while the XAML loads
+        DiagnosisPanel.Visibility = Visibility.Collapsed;
+        DiagnoseLabel.Text = "Diagnose this app";
+        _diagnosis = null;
         AdvancedPanel.Visibility = Visibility.Collapsed;
         AdvancedChevron.Text = "";
+    }
+
+    private AppDiagnosis? _diagnosis;
+    private AppProfile? _diagnosed;
+
+    // Read-only look at the running app, off the UI thread (it captures the window and reads the app's DLL list).
+    private async void DiagnoseApp(object sender, RoutedEventArgs e)
+    {
+        if (SelectedProfile is not { } profile) return;
+        DiagnoseButton.IsEnabled = false;
+        DiagnoseLabel.Text = "Looking at the app...";
+        try
+        {
+            var snapshot = profile.Clone();
+            var diagnosis = await Task.Run(() => AppDiagnosisService.Diagnose(snapshot));
+            if (SelectedProfile != profile) return;
+            _diagnosis = diagnosis;
+            _diagnosed = profile;
+            ShowDiagnosis(diagnosis);
+        }
+        finally
+        {
+            DiagnoseButton.IsEnabled = true;
+            DiagnoseLabel.Text = "Diagnose again";
+        }
+    }
+
+    private void ShowDiagnosis(AppDiagnosis d)
+    {
+        var facts = $"{d.Framework} · draws with {d.Rendering}";
+        if (d.Packaged) facts += " · Store app";
+        if (d.Elevated) facts += " · runs as administrator";
+        DiagnosisFacts.Text = facts;
+        DiagnosisNotes.Text = string.Join(Environment.NewLine, d.Notes.Select(note => "• " + note));
+        DiagnosisNotes.Visibility = d.Notes.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        DiagnosisRoute.Text = "Recommended: " + d.RouteLabel;
+        DiagnosisReason.Text = d.Reason;
+        ApplyRouteButton.Content = d.Route == GlassRoute.ExperimentalDxgi ? "Apply (restarts the app)" : "Apply";
+        ApplyRouteButton.Visibility = d.Route == GlassRoute.Unreachable ? Visibility.Collapsed : Visibility.Visible;
+        DiagnosisPanel.Visibility = Visibility.Visible;
+    }
+
+    // The same settings a person would pick for that route; they apply live like any other edit.
+    private void ApplyRoute(object sender, RoutedEventArgs e)
+    {
+        if (_diagnosis is not { } d || _diagnosed is not { } profile || SelectedProfile != profile) return;
+        profile.Enabled = true;
+        switch (d.Route)
+        {
+            case GlassRoute.LiveGlassHook:
+                profile.Mode = GlassMode.Native;
+                profile.HookGlass = true;
+                break;
+            case GlassRoute.NativeWholeWindow:
+                profile.Mode = GlassMode.Native;
+                profile.ExtendIntoClient = true;
+                profile.DxgiGlass = false;
+                break;
+            case GlassRoute.NativeFrame:
+                profile.Mode = GlassMode.Native;
+                profile.ExtendIntoClient = false;
+                profile.DxgiGlass = false;
+                break;
+            case GlassRoute.ExperimentalDxgi:
+                profile.Mode = GlassMode.Native;
+                profile.ExtendIntoClient = true;
+                profile.DxgiGlass = true;
+                break;
+            case GlassRoute.Overlay:
+                profile.Mode = GlassMode.Host;
+                profile.DxgiGlass = false;
+                break;
+        }
+        DiagnosisRoute.Text = "Applied: " + d.RouteLabel;
+        ApplyRouteButton.Visibility = Visibility.Collapsed;
     }
 
     private void ToggleAdvanced(object sender, RoutedEventArgs e)
