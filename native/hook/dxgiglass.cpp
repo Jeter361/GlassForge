@@ -59,7 +59,7 @@ namespace
     bool DetectNow(unsigned frame) { return frame == 0 || frame == 30 || frame == 120 || frame == 300 || frame % 600 == 0; }
 
     constexpr char ShaderSource[] = R"(
-cbuffer Params : register(b0) { float3 Background; float Floor; };
+cbuffer Params : register(b0) { float3 Background; float Floor; uint KeepCount; uint3 Padding; int4 Keep[8]; };
 Texture2D<float4> Frame : register(t0);
 float4 VS(uint id : SV_VertexID) : SV_Position
 {
@@ -69,6 +69,9 @@ float4 VS(uint id : SV_VertexID) : SV_Position
 float4 PS(float4 position : SV_Position) : SV_Target
 {
     float3 c = Frame.Load(int3(position.xy, 0)).rgb;
+    // Areas left exactly as the app drew them (a remote desktop view, a video), fully solid.
+    for (uint i = 0; i < KeepCount; ++i)
+        if (position.x >= Keep[i].x && position.y >= Keep[i].y && position.x < Keep[i].z && position.y < Keep[i].w) return float4(c, 1);
     float3 b = Background;
     // Per channel, how far the pixel is from the background toward white or black, as a share of the room there is.
     float3 up = (c - b) / max(1 - b, 1e-4);
@@ -82,6 +85,50 @@ float4 PS(float4 position : SV_Position) : SV_Target
 )";
 
     ComPtr<ID3DBlob> g_vsCode, g_psCode;
+
+    // Rectangles to keep solid, in the window's client pixels, published by GlassForge from outside the process (it
+    // finds them with UI Automation) in Local\GlassForge.DxgiKeep.<pid>. Layout: UINT32 count, then up to 8 RECTs.
+    struct KeepAreas
+    {
+        UINT32 count;
+        RECT rects[8];
+    };
+    struct Params
+    {
+        float background[3];
+        float floor;
+        UINT32 keepCount;
+        UINT32 padding[3];
+        INT32 keep[8][4];
+    };
+    static_assert(sizeof(Params) == 160);
+    HANDLE g_keepMapping = nullptr;
+    const KeepAreas* g_keepView = nullptr;
+    unsigned g_keepRetry = 0;
+
+    void ReadKeepAreas(Params& params)
+    {
+        if (!g_keepView && g_keepRetry++ % 60 == 0)
+        {
+            wchar_t name[64]{};
+            swprintf_s(name, L"Local\\GlassForge.DxgiKeep.%lu", GetCurrentProcessId());
+            if ((g_keepMapping = OpenFileMappingW(FILE_MAP_READ, FALSE, name)) != nullptr)
+            {
+                g_keepView = static_cast<const KeepAreas*>(MapViewOfFile(g_keepMapping, FILE_MAP_READ, 0, 0, sizeof(KeepAreas)));
+                Log(L"dxgi: keep-solid areas %s", g_keepView ? L"connected" : L"could not be mapped");
+            }
+        }
+        if (!g_keepView) return;
+        const KeepAreas areas = *g_keepView;
+        params.keepCount = std::min<UINT32>(areas.count, 8);
+        for (UINT32 i = 0; i < params.keepCount; ++i)
+        {
+            params.keep[i][0] = areas.rects[i].left;
+            params.keep[i][1] = areas.rects[i].top;
+            params.keep[i][2] = areas.rects[i].right;
+            params.keep[i][3] = areas.rects[i].bottom;
+        }
+    }
 
     struct DeviceResources
     {
@@ -131,7 +178,7 @@ float4 PS(float4 position : SV_Position) : SV_Target
         if (!CompileShaders() || FAILED(device->QueryInterface(IID_PPV_ARGS(&device1)))) return r;
         const D3D_FEATURE_LEVEL level = device->GetFeatureLevel();
         const UINT flags = (device->GetCreationFlags() & D3D11_CREATE_DEVICE_SINGLETHREADED) ? D3D11_1_CREATE_DEVICE_CONTEXT_STATE_SINGLETHREADED : 0;
-        D3D11_BUFFER_DESC params{ 16, D3D11_USAGE_DEFAULT, D3D11_BIND_CONSTANT_BUFFER };
+        D3D11_BUFFER_DESC params{ sizeof(Params), D3D11_USAGE_DEFAULT, D3D11_BIND_CONSTANT_BUFFER };
         D3D11_BLEND_DESC blend{};
         blend.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
         r.ok = SUCCEEDED(device1->CreateDeviceContextState(flags, &level, 1, D3D11_SDK_VERSION, __uuidof(ID3D11Device1), nullptr, &r.state))
@@ -251,11 +298,12 @@ float4 PS(float4 position : SV_Position) : SV_Target
         ComPtr<ID3D11RenderTargetView> target;
         if (FAILED(device->CreateRenderTargetView(frame.Get(), nullptr, &target))) { chain.unsupported = true; ReleaseSRWLockExclusive(&g_lock); return; }
         context->CopyResource(chain.copy.Get(), frame.Get());
-        const float params[4] = { chain.background[0], chain.background[1], chain.background[2], BackgroundFloor };
+        Params params{ { chain.background[0], chain.background[1], chain.background[2] }, BackgroundFloor };
+        ReadKeepAreas(params);
 
         ComPtr<ID3DDeviceContextState> previous;
         context1->SwapDeviceContextState(resources.state.Get(), &previous);
-        context->UpdateSubresource(resources.params.Get(), 0, nullptr, params, 0, 0);
+        context->UpdateSubresource(resources.params.Get(), 0, nullptr, &params, 0, 0);
         const D3D11_VIEWPORT viewport{ 0, 0, float(frameDesc.Width), float(frameDesc.Height), 0, 1 };
         context->RSSetViewports(1, &viewport);
         context->OMSetRenderTargets(1, target.GetAddressOf(), nullptr);
@@ -508,6 +556,10 @@ void RemoveDxgiGlass()
         g_installed = DetourTransactionCommit() != NO_ERROR;
         g_chains.clear();
         g_devices.clear();
+        if (g_keepView) UnmapViewOfFile(g_keepView);
+        if (g_keepMapping) CloseHandle(g_keepMapping);
+        g_keepView = nullptr;
+        g_keepMapping = nullptr;
         Log(L"dxgi: present detours removed");
     }
     ReleaseSRWLockExclusive(&g_lock);
