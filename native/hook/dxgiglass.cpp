@@ -15,6 +15,8 @@
 #include <d3d11_1.h>
 #include <d3dcompiler.h>
 #include <dcomp.h>
+#include <dwmapi.h>
+#include <cstdlib>
 #include <algorithm>
 #include <vector>
 #include <wrl/client.h>
@@ -49,6 +51,19 @@ namespace
         ComPtr<IDCompositionVisual2> visual;
     };
     std::vector<WindowVisual> g_visuals;
+    // The window each substituted swap chain draws into, to skip the glass while it is full screen.
+    std::map<IDXGISwapChain*, HWND> g_chainWindows;
+
+    // Full screen (a window covering its whole monitor: a remote session, video, a game) gets no glass at all.
+    bool IsFullscreen(HWND window)
+    {
+        RECT rect{};
+        MONITORINFO monitor{ sizeof monitor };
+        const HWND root = GetAncestor(window, GA_ROOT);
+        return GetWindowRect(root, &rect) && GetMonitorInfoW(MonitorFromWindow(root, MONITOR_DEFAULTTONEAREST), &monitor)
+            && rect.left <= monitor.rcMonitor.left && rect.top <= monitor.rcMonitor.top && rect.right >= monitor.rcMonitor.right
+            && rect.bottom >= monitor.rcMonitor.bottom;
+    }
     bool g_installed = false;
     SRWLOCK g_lock = SRWLOCK_INIT;
 
@@ -59,7 +74,7 @@ namespace
     bool DetectNow(unsigned frame) { return frame == 0 || frame == 30 || frame == 120 || frame == 300 || frame % 600 == 0; }
 
     constexpr char ShaderSource[] = R"(
-cbuffer Params : register(b0) { float3 Background; float Floor; uint KeepCount; uint ClearCount; uint2 Padding; int4 Keep[8]; int4 Clear[8]; };
+cbuffer Params : register(b0) { float3 Background; float Floor; uint KeepCount; uint ClearCount; uint2 Padding; int4 Keep[8]; int4 Clear[8]; float4 Background2; };
 Texture2D<float4> Frame : register(t0);
 float4 VS(uint id : SV_VertexID) : SV_Position
 {
@@ -77,6 +92,21 @@ float4 PS(float4 position : SV_Position) : SV_Target
     for (uint j = 0; j < ClearCount; ++j)
         if (position.x >= Clear[j].x && position.y >= Clear[j].y && position.x < Clear[j].z && position.y < Clear[j].w) return float4(Background * Floor, Floor);
     float3 b = Background;
+    // Apps often have a second large flat color (a black title strip or sidebar). Where a pixel's surroundings are
+    // mostly that color, it is the key instead, so text on it separates cleanly too.
+    if (Background2.a > 0)
+    {
+        int votes = 0;
+        const int2 offsets[5] = { int2(0, 0), int2(-6, 0), int2(6, 0), int2(0, -6), int2(0, 6) };
+        for (int k = 0; k < 5; ++k)
+        {
+            float3 n = Frame.Load(int3(int2(position.xy) + offsets[k], 0)).rgb;
+            float d1 = max(max(abs(n.r - Background.r), abs(n.g - Background.g)), abs(n.b - Background.b));
+            float d2 = max(max(abs(n.r - Background2.r), abs(n.g - Background2.g)), abs(n.b - Background2.b));
+            votes += d2 < 0.01 ? 1 : (d1 < 0.01 ? -1 : 0);
+        }
+        if (votes > 0) b = Background2.rgb;
+    }
     // Per channel, how far the pixel is from the background toward white or black, as a share of the room there is.
     float3 up = (c - b) / max(1 - b, 1e-4);
     float3 down = (b - c) / max(b, 1e-4);
@@ -106,8 +136,9 @@ float4 PS(float4 position : SV_Position) : SV_Target
         UINT32 padding[2];
         INT32 keep[8][4];
         INT32 clear[8][4];
+        float background2[4]; // rgb, a = 1 when present
     };
-    static_assert(sizeof(Params) == 288);
+    static_assert(sizeof(Params) == 304);
     HANDLE g_keepMapping = nullptr;
     const KeepAreas* g_keepView = nullptr;
     unsigned g_keepRetry = 0;
@@ -153,7 +184,9 @@ float4 PS(float4 position : SV_Position) : SV_Target
         UINT width = 0, height = 0;
         DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
         float background[3]{};
+        float background2[3]{};
         bool haveBackground = false;
+        bool haveBackground2 = false;
         unsigned frames = 0;
         bool logged = false;
         bool unsupported = false;
@@ -188,8 +221,19 @@ float4 PS(float4 position : SV_Position) : SV_Target
             const BYTE* pixel = static_cast<const BYTE*>(mapped.pData) + y * mapped.RowPitch + x * 4;
             return pixel[0] > Black || pixel[1] > Black || pixel[2] > Black;
         };
-        auto rowLit = [&](LONG y) { for (LONG x = area.left; x < area.right; ++x) if (lit(x, y)) return true; return false; };
-        auto columnLit = [&](LONG x, LONG top, LONG bottom) { for (LONG y = top; y < bottom; ++y) if (lit(x, y)) return true; return false; };
+        // A row or column counts as picture when at least 1% of it is lit, ignoring a few pixels at each end: the
+        // element's own edges can carry a 1 px border or a neighbor's divider, which would otherwise make every row count.
+        constexpr LONG Edge = 4;
+        auto rowLit = [&](LONG y) {
+            LONG count = 0;
+            for (LONG x = area.left + Edge; x < area.right - Edge; ++x) count += lit(x, y);
+            return count > std::max<LONG>(2, (area.right - area.left) / 100);
+        };
+        auto columnLit = [&](LONG x, LONG top, LONG bottom) {
+            LONG count = 0;
+            for (LONG y = top + Edge; y < bottom - Edge; ++y) count += lit(x, y);
+            return count > std::max<LONG>(2, (bottom - top) / 100);
+        };
         RECT result = area;
         while (result.top < result.bottom && !rowLit(result.top)) ++result.top;
         while (result.bottom > result.top && !rowLit(result.bottom - 1)) --result.bottom;
@@ -217,7 +261,19 @@ float4 PS(float4 position : SV_Position) : SV_Target
             D3D11_MAPPED_SUBRESOURCE mapped{};
             if (context->Map(chain.trimStaging.Get(), 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &mapped) == S_OK)
             {
-                for (UINT32 i = 0; i < chain.pendingCount; ++i) chain.trimmed[i] = TrimBlack(mapped, chain.pendingSource[i]);
+                for (UINT32 i = 0; i < chain.pendingCount; ++i)
+                {
+                    const RECT before = chain.trimmed[i];
+                    chain.trimmed[i] = TrimBlack(mapped, chain.pendingSource[i]);
+                    if (!EqualRect(&before, &chain.trimmed[i]))
+                    {
+                        const RECT& a = chain.pendingSource[i];
+                        const RECT& t = chain.trimmed[i];
+                        const BYTE* corner = static_cast<const BYTE*>(mapped.pData) + (a.top + 2) * mapped.RowPitch + (a.left + 2) * 4;
+                        Log(L"dxgi: keep area %ld,%ld-%ld,%ld trimmed to %ld,%ld-%ld,%ld (frame %ux%u, pixel near corner %02X%02X%02X)", a.left, a.top,
+                            a.right, a.bottom, t.left, t.top, t.right, t.bottom, desc.Width, desc.Height, corner[0], corner[1], corner[2]);
+                    }
+                }
                 context->Unmap(chain.trimStaging.Get(), 0);
                 std::copy_n(chain.pendingSource, chain.pendingCount, chain.trimSource);
                 chain.trimCount = chain.pendingCount;
@@ -250,7 +306,23 @@ float4 PS(float4 position : SV_Position) : SV_Target
             chain.pendingCount = params.keepCount;
             chain.trimPending = true;
         }
-        if (!current) return; // until measured, the whole published area stays solid
+        RECT trimmed[8]{};
+        std::copy_n(chain.trimmed, 8, trimmed);
+        if (!current)
+        {
+            // Until measured, an area the same size as a measured one (it moved, or the reading jittered) borrows that
+            // measurement, shifted; anything else stays fully solid.
+            if (chain.trimCount != params.keepCount) return;
+            for (UINT32 i = 0; i < params.keepCount; ++i)
+            {
+                const RECT& was = chain.trimSource[i];
+                if (std::abs((areas[i].right - areas[i].left) - (was.right - was.left)) > 4
+                    || std::abs((areas[i].bottom - areas[i].top) - (was.bottom - was.top)) > 4)
+                    return;
+                OffsetRect(&trimmed[i], areas[i].left - was.left, areas[i].top - was.top);
+                IntersectRect(&trimmed[i], &trimmed[i], &areas[i]);
+            }
+        }
         for (UINT32 i = 0; i < params.keepCount; ++i)
         {
             params.clear[i][0] = areas[i].left;
@@ -262,7 +334,7 @@ float4 PS(float4 position : SV_Position) : SV_Target
         UINT32 kept = 0;
         for (UINT32 i = 0; i < params.keepCount; ++i)
         {
-            const RECT& r = chain.trimmed[i];
+            const RECT& r = trimmed[i];
             if (IsRectEmpty(&r)) continue; // all black: nothing worth keeping solid
             params.keep[kept][0] = r.left;
             params.keep[kept][1] = r.top;
@@ -336,16 +408,35 @@ float4 PS(float4 position : SV_Position) : SV_Target
                 ++samples;
             }
         context->Unmap(staging.Get(), 0);
-        UINT32 best = 0;
-        unsigned bestCount = 0;
+        UINT32 best = 0, second = 0;
+        unsigned bestCount = 0, secondCount = 0;
         for (const auto& [pixel, count] : counts)
-            if (count > bestCount) { best = pixel; bestCount = count; }
+        {
+            if (count > bestCount) { second = best; secondCount = bestCount; best = pixel; bestCount = count; }
+            else if (count > secondCount) { second = pixel; secondCount = count; }
+        }
         // A first color needs a clear plurality; replacing a known one needs a majority, so a dialog or a dark page
         // passing by doesn't switch the key.
         if (bestCount * (chain.haveBackground ? 2 : 4) < samples) return;
-        float first = (best & 0xFF) / 255.f, second = ((best >> 8) & 0xFF) / 255.f, third = ((best >> 16) & 0xFF) / 255.f;
         const bool bgra = desc.Format == DXGI_FORMAT_B8G8R8A8_UNORM;
-        const float found[3] = { bgra ? third : first, second, bgra ? first : third };
+        auto toRgb = [bgra](UINT32 pixel, float* rgb) {
+            const float c0 = (pixel & 0xFF) / 255.f, c1 = ((pixel >> 8) & 0xFF) / 255.f, c2 = ((pixel >> 16) & 0xFF) / 255.f;
+            rgb[0] = bgra ? c2 : c0;
+            rgb[1] = c1;
+            rgb[2] = bgra ? c0 : c2;
+        };
+        float found[3];
+        toRgb(best, found);
+        // A second flat color covering a tenth of the window is keyed too (where it surrounds the pixel).
+        const bool hadSecond = chain.haveBackground2;
+        chain.haveBackground2 = secondCount * 10 >= samples;
+        if (chain.haveBackground2)
+        {
+            float previous[3] = { chain.background2[0], chain.background2[1], chain.background2[2] };
+            toRgb(second, chain.background2);
+            if (!hadSecond || previous[0] != chain.background2[0] || previous[1] != chain.background2[1] || previous[2] != chain.background2[2])
+                Log(L"dxgi: second background #%06X (%u%% of samples)", second, secondCount * 100 / samples);
+        }
         const bool changed = !chain.haveBackground || found[0] != chain.background[0] || found[1] != chain.background[1] || found[2] != chain.background[2];
         for (int i = 0; i < 3; ++i) chain.background[i] = found[i];
         if (changed)
@@ -360,6 +451,11 @@ float4 PS(float4 position : SV_Position) : SV_Target
         AcquireSRWLockExclusive(&g_lock);
         auto& chain = g_chains[swapChain];
         if (chain.unsupported) { ReleaseSRWLockExclusive(&g_lock); return; }
+        if (const auto window = g_chainWindows.find(swapChain); window != g_chainWindows.end() && IsFullscreen(window->second))
+        {
+            ReleaseSRWLockExclusive(&g_lock);
+            return;
+        }
         ComPtr<ID3D11Device> device;
         ComPtr<ID3D11Texture2D> frame;
         DXGI_SWAP_CHAIN_DESC desc{};
@@ -416,6 +512,11 @@ float4 PS(float4 position : SV_Position) : SV_Target
         if (FAILED(device->CreateRenderTargetView(frame.Get(), nullptr, &target))) { chain.unsupported = true; ReleaseSRWLockExclusive(&g_lock); return; }
         context->CopyResource(chain.copy.Get(), frame.Get());
         Params params{ { chain.background[0], chain.background[1], chain.background[2] }, BackgroundFloor };
+        if (chain.haveBackground2)
+        {
+            for (int i = 0; i < 3; ++i) params.background2[i] = chain.background2[i];
+            params.background2[3] = 1;
+        }
         ReadKeepAreas(params);
         TrimKeepAreas(device.Get(), context.Get(), frame.Get(), chain, params);
 
@@ -449,6 +550,43 @@ float4 PS(float4 position : SV_Position) : SV_Target
     {
         Process(swapChain, flags);
         return Real_Present1(swapChain, sync, flags, parameters);
+    }
+
+    std::map<HWND, WNDPROC> g_originalProcs;
+
+    LRESULT CALLBACK KeepFrameActive(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
+    {
+        AcquireSRWLockShared(&g_lock);
+        const auto it = g_originalProcs.find(window);
+        const WNDPROC original = it == g_originalProcs.end() ? DefWindowProcW : it->second;
+        ReleaseSRWLockShared(&g_lock);
+        if (message == WM_NCACTIVATE) return CallWindowProcW(original, window, message, TRUE, lParam);
+        if (message == WM_NCDESTROY)
+        {
+            SetWindowLongPtrW(window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(original));
+            AcquireSRWLockExclusive(&g_lock);
+            g_originalProcs.erase(window);
+            ReleaseSRWLockExclusive(&g_lock);
+        }
+        return CallWindowProcW(original, window, message, wParam, lParam);
+    }
+
+    // Called with g_lock held exclusively. Window procedures can be swapped from any thread of the process, which
+    // matters because apps often create their swap chain off the window's thread.
+    void KeepActiveLocked(HWND window)
+    {
+        if (g_originalProcs.count(window)) return;
+        HMODULE self = nullptr; // a window procedure must never outlive the DLL
+        GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN, reinterpret_cast<LPCWSTR>(&KeepFrameActive), &self);
+        g_originalProcs[window] = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(KeepFrameActive)));
+        PostMessageW(window, WM_NCACTIVATE, TRUE, 0);
+        // The glass itself: live Acrylic behind the whole window. Set once from inside the app, so nothing outside
+        // has to keep re-applying it on focus changes.
+        const int acrylic = 3; // DWMSBT_TRANSIENTWINDOW
+        const MARGINS whole{ -1, -1, -1, -1 };
+        const HRESULT backdrop = DwmSetWindowAttribute(window, DWMWA_SYSTEMBACKDROP_TYPE, &acrylic, sizeof acrylic);
+        const HRESULT extend = DwmExtendFrameIntoClientArea(window, &whole);
+        Log(L"dxgi: window %p kept drawn as active; acrylic %08X, whole-window frame %08X", window, backdrop, extend);
     }
 
     bool ComposableFormat(DXGI_FORMAT format)
@@ -493,6 +631,12 @@ float4 PS(float4 position : SV_Position) : SV_Target
             return false;
         }
         Log(L"dxgi: window %p now shows a composition swap chain %p (%ux%u format %d)", window, composed.Get(), desc.Width, desc.Height, desc.Format);
+        AcquireSRWLockExclusive(&g_lock);
+        KeepActiveLocked(GetAncestor(window, GA_ROOT));
+        ReleaseSRWLockExclusive(&g_lock);
+        AcquireSRWLockExclusive(&g_lock);
+        g_chainWindows[composed.Get()] = window;
+        ReleaseSRWLockExclusive(&g_lock);
         *chain = composed.Detach();
         return true;
     }
