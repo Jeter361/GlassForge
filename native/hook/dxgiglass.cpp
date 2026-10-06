@@ -584,6 +584,9 @@ float4 PS(float4 position : SV_Position) : SV_Target
         // has to keep re-applying it on focus changes.
         const int acrylic = 3; // DWMSBT_TRANSIENTWINDOW
         const MARGINS whole{ -1, -1, -1, -1 };
+        // Dark: Acrylic follows the window's dark-mode flag, and a light backdrop washes out an app's light text.
+        const BOOL dark = TRUE;
+        DwmSetWindowAttribute(window, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof dark);
         const HRESULT backdrop = DwmSetWindowAttribute(window, DWMWA_SYSTEMBACKDROP_TYPE, &acrylic, sizeof acrylic);
         const HRESULT extend = DwmExtendFrameIntoClientArea(window, &whole);
         Log(L"dxgi: window %p kept drawn as active; acrylic %08X, whole-window frame %08X", window, backdrop, extend);
