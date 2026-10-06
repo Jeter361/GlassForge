@@ -97,7 +97,7 @@ Excel, measured: `C:\Program Files\Microsoft Office\root\Office16\EXCEL.EXE`, Me
   hooking**. Prefer no injection. I've given blanket permission to inject into any app, **except**: warn me before
   anything that could take down **Windows Terminal**. Claude Code runs inside it, and all its tabs share one process.
 - I judge the look by eye; screen captures (GDI) can't see DWM glass. Ask me to look and describe, or to send a
-  screenshot. My screenshots land in `C:\Users\alexw\OneDrive\Pictures\Screenshots`, and you can read exact pixel values
+  screenshot. My screenshots land in `%USERPROFILE%\OneDrive\Pictures\Screenshots`, and you can read exact pixel values
   from them with `System.Drawing` (that's how the static-wallpaper strip was identified). Don't take full-screen captures
   yourself: work chats are visible.
 - Every hook feature stays opt-in: an EXPERIMENTAL toggle, a red warning in the profile editor, and plain wording when an
@@ -169,10 +169,10 @@ only then build. Log once per distinct key to keep the log readable. Every visua
 | `src/GlassForge.App/MainWindow.xaml` | Profile editor; each app's EXPERIMENTAL toggle and red warning block |
 | `tests/GlassForge.Tests/Program.cs` | Smoke tests |
 | `%LOCALAPPDATA%\GlassForge\` | `profiles.json` (+ backups), `hook.log`, `hook\` (extracted DLLs), `touched-windows.json` |
-| `C:\Users\alexw\Downloads\GlassForge — Full File Explorer Glass Engineering Writeup.md` | Older copy of the writeup (the repo's `docs/GLASS_WRITEUP.md` is current) |
+| `%USERPROFILE%\Downloads\GlassForge — Full File Explorer Glass Engineering Writeup.md` | Older copy of the writeup (the repo's `docs/GLASS_WRITEUP.md` is current) |
 | `C:\docs\GlassForge_*.md` | Earlier session notes (Explorer experiment and progress, MicaForEveryone inspiration) |
 | `C:\glass\*Transparency.ps1` | My old PowerShell prototypes. They can still be running and fight GlassForge, so check for them if a window misbehaves |
-| `C:\Users\alexw\AppData\Local\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json` | Terminal settings (theme "GlassForge glass"; backup `settings.json.before-glassforge.bak`) |
+| `%USERPROFILE%\AppData\Local\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json` | Terminal settings (theme "GlassForge glass"; backup `settings.json.before-glassforge.bak`) |
 
 Start by reading the docs, then report PowerPoint's process details and your plan for generalising Word's fix to Excel
 and PowerPoint.

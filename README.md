@@ -46,6 +46,8 @@ Tune tint color and opacity live, with changes applied to the target app instant
 - Two modes per profile: **Glass host** (works with any app) or **Native backdrop**, where Windows draws live Acrylic on the app's own frame with zero overhead and keeps it live when the app loses focus (Windows 11 22H2+). Apps that leave their background clear, like Notepad and Windows Terminal, can be glass edge to edge; apps that paint their own background (File Explorer's file list, Outlook, Chrome) get it on the frame only.
 - Per-profile window options in either mode: corner style (default, round, small, square) and a forced dark or light title bar.
 - Pick up a newly launched app's first window immediately instead of on the next polling pass.
+- Notepad: full-window glass behind the text, plus a **Solid text area (for HDR)** option for HDR displays, where Windows would otherwise make the typed text invisible.
+- **Experimental, opt-in per app (injects code, see [Safety model](#safety-model)):** live glass for File Explorer (whole window), Windows Terminal (tab row), Windows Settings, Word, Excel, PowerPoint and Teams (native chrome; the chat pane stays solid). Each one is off by default behind its own toggle and red warning.
 
 ## Requirements
 
@@ -82,6 +84,8 @@ src/GlassForge.App/
   Services/     Discovery, persistence, startup, and glass-host engine
   App.xaml      Application lifecycle and background mode
   MainWindow.*  Profile management UI and tray integration
+native/hook/
+  Opt-in hook DLL (C++, CMake) for the experimental per-app glass
 tests/GlassForge.Tests/
   Dependency-free foundation smoke tests
 ```
@@ -123,7 +127,9 @@ Native backdrop mode, the window options, and the window-eligibility rules are i
 
 ## Safety model
 
-GlassForge targets windows by owning process ID. It does not inject code, patch application files, read application content, or require administrator privileges for ordinary applications.
+GlassForge targets windows by owning process ID. By default it does not inject code, patch application files, read application content, or require administrator privileges for ordinary applications. Glass host and Native backdrop modes only use public Win32 and DWM APIs from outside the app.
+
+**The exception is the experimental per-app hook.** For File Explorer, Windows Terminal, Settings, Word, Excel, PowerPoint and Teams, a profile can opt in to loading GlassForge's hook DLL (`native/hook`) into that app to redraw or re-enable its backdrop. It is off unless you turn it on, each toggle carries a warning, and turning it off restores open windows. Know the risks before enabling it: a bug can crash or freeze the target app (for Explorer, also the taskbar and desktop; for Office, save your documents first), antivirus may flag it, it can break after Windows or app updates, and it can conflict with other mods such as Windhawk or StartAllBack. Some apps need a restart to fully drop the hook.
 
 ## License
 
