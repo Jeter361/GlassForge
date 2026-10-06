@@ -18,6 +18,7 @@
 #include <dwmapi.h>
 #include <cstdlib>
 #include <algorithm>
+#include <functional>
 #include <vector>
 #include <wrl/client.h>
 #include <map>
@@ -71,10 +72,10 @@ namespace
     constexpr float BackgroundFloor = 0.12f;
     // When to look for the background color: a few times early (apps show a splash screen in a different color first),
     // then every 600 frames in case the app switches theme.
-    bool DetectNow(unsigned frame) { return frame == 0 || frame == 30 || frame == 120 || frame == 300 || frame % 600 == 0; }
+    bool DetectNow(unsigned frame) { return frame == 0 || frame == 30 || frame == 60 || frame == 120 || frame == 200 || frame % 300 == 0; }
 
     constexpr char ShaderSource[] = R"(
-cbuffer Params : register(b0) { float3 Background; float Floor; uint KeepCount; uint ClearCount; uint2 Padding; int4 Keep[8]; int4 Clear[8]; float4 Background2; };
+cbuffer Params : register(b0) { float3 Background; float Floor; uint KeepCount; uint ClearCount; uint2 Padding; int4 Keep[8]; int4 Clear[8]; float4 Extra[3]; };
 Texture2D<float4> Frame : register(t0);
 float4 VS(uint id : SV_VertexID) : SV_Position
 {
@@ -92,20 +93,25 @@ float4 PS(float4 position : SV_Position) : SV_Target
     for (uint j = 0; j < ClearCount; ++j)
         if (position.x >= Clear[j].x && position.y >= Clear[j].y && position.x < Clear[j].z && position.y < Clear[j].w) return float4(Background * Floor, Floor);
     float3 b = Background;
-    // Apps often have a second large flat color (a black title strip or sidebar). Where a pixel's surroundings are
-    // mostly that color, it is the key instead, so text on it separates cleanly too.
-    if (Background2.a > 0)
+    // Apps often have more large flat colors than one (a black title strip and sidebar, darker panels). Each pixel
+    // is keyed against whichever of them mostly surrounds it, so text on those areas separates cleanly too.
     {
-        int votes = 0;
+        int votes[4] = { 0, 0, 0, 0 };
         const int2 offsets[5] = { int2(0, 0), int2(-6, 0), int2(6, 0), int2(0, -6), int2(0, 6) };
         for (int k = 0; k < 5; ++k)
         {
             float3 n = Frame.Load(int3(int2(position.xy) + offsets[k], 0)).rgb;
-            float d1 = max(max(abs(n.r - Background.r), abs(n.g - Background.g)), abs(n.b - Background.b));
-            float d2 = max(max(abs(n.r - Background2.r), abs(n.g - Background2.g)), abs(n.b - Background2.b));
-            votes += d2 < 0.01 ? 1 : (d1 < 0.01 ? -1 : 0);
+            float3 d = abs(n - Background);
+            if (max(max(d.r, d.g), d.b) < 0.01) votes[0]++;
+            for (int e = 0; e < 3; ++e)
+            {
+                float3 de = abs(n - Extra[e].rgb);
+                if (Extra[e].a > 0 && max(max(de.r, de.g), de.b) < 0.01) votes[e + 1]++;
+            }
         }
-        if (votes > 0) b = Background2.rgb;
+        int best = 0;
+        for (int e = 1; e < 4; ++e) if (votes[e] > votes[best]) best = e;
+        if (best > 0) b = Extra[best - 1].rgb;
     }
     // Per channel, how far the pixel is from the background toward white or black, as a share of the room there is.
     float3 up = (c - b) / max(1 - b, 1e-4);
@@ -136,9 +142,9 @@ float4 PS(float4 position : SV_Position) : SV_Target
         UINT32 padding[2];
         INT32 keep[8][4];
         INT32 clear[8][4];
-        float background2[4]; // rgb, a = 1 when present
+        float extra[3][4]; // rgb, a = 1 when present
     };
-    static_assert(sizeof(Params) == 304);
+    static_assert(sizeof(Params) == 336);
     HANDLE g_keepMapping = nullptr;
     const KeepAreas* g_keepView = nullptr;
     unsigned g_keepRetry = 0;
@@ -184,9 +190,9 @@ float4 PS(float4 position : SV_Position) : SV_Target
         UINT width = 0, height = 0;
         DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
         float background[3]{};
-        float background2[3]{};
+        float extra[3][3]{};
+        UINT32 extraCount = 0;
         bool haveBackground = false;
-        bool haveBackground2 = false;
         unsigned frames = 0;
         bool logged = false;
         bool unsupported = false;
@@ -408,15 +414,11 @@ float4 PS(float4 position : SV_Position) : SV_Target
                 ++samples;
             }
         context->Unmap(staging.Get(), 0);
-        UINT32 best = 0, second = 0;
-        unsigned bestCount = 0, secondCount = 0;
-        for (const auto& [pixel, count] : counts)
-        {
-            if (count > bestCount) { second = best; secondCount = bestCount; best = pixel; bestCount = count; }
-            else if (count > secondCount) { second = pixel; secondCount = count; }
-        }
-        // A first color needs a clear plurality; replacing a known one needs a majority, so a dialog or a dark page
-        // passing by doesn't switch the key.
+        std::vector<std::pair<unsigned, UINT32>> ranked;
+        for (const auto& [pixel, count] : counts) ranked.emplace_back(count, pixel);
+        std::sort(ranked.begin(), ranked.end(), std::greater<>());
+        const UINT32 best = ranked.empty() ? 0 : ranked[0].second;
+        const unsigned bestCount = ranked.empty() ? 0 : ranked[0].first;
         if (bestCount * (chain.haveBackground ? 2 : 4) < samples) return;
         const bool bgra = desc.Format == DXGI_FORMAT_B8G8R8A8_UNORM;
         auto toRgb = [bgra](UINT32 pixel, float* rgb) {
@@ -427,22 +429,33 @@ float4 PS(float4 position : SV_Position) : SV_Target
         };
         float found[3];
         toRgb(best, found);
-        // A second flat color covering a tenth of the window is keyed too (where it surrounds the pixel).
-        const bool hadSecond = chain.haveBackground2;
-        // Only a color of the same family: a dark app's black sidebar, never its white text or a light panel (keying
-        // those washes the window out).
-        float candidate[3];
-        toRgb(second, candidate);
+        // More flat colors covering at least 3% each are keyed too, where they surround the pixel: only ones of the
+        // main color's light/dark family (a dark app's black sidebar, never its white text or a light panel, which
+        // would wash the window out).
         auto light = [](const float* rgb) { return std::max({ rgb[0], rgb[1], rgb[2] }) > 0.5f; };
-        chain.haveBackground2 = secondCount * 10 >= samples && light(candidate) == light(found);
-        if (chain.haveBackground2)
+        float extras[3][3]{};
+        UINT32 extraCount = 0;
+        for (size_t i = 1; i < ranked.size() && extraCount < 3; ++i)
         {
-            float previous[3] = { chain.background2[0], chain.background2[1], chain.background2[2] };
-            for (int i = 0; i < 3; ++i) chain.background2[i] = candidate[i];
-            if (!hadSecond || previous[0] != chain.background2[0] || previous[1] != chain.background2[1] || previous[2] != chain.background2[2])
-                Log(L"dxgi: second background #%02X%02X%02X (%u%% of samples)", int(candidate[0] * 255 + .5f), int(candidate[1] * 255 + .5f),
-                    int(candidate[2] * 255 + .5f), secondCount * 100 / samples);
+            if (ranked[i].first * 33 < samples) break;
+            float candidate[3];
+            toRgb(ranked[i].second, candidate);
+            if (light(candidate) != light(found)) continue;
+            std::copy_n(candidate, 3, extras[extraCount++]);
         }
+        if (extraCount != chain.extraCount || memcmp(extras, chain.extra, sizeof extras) != 0)
+        {
+            std::wstring list;
+            for (UINT32 i = 0; i < extraCount; ++i)
+            {
+                wchar_t hex[16];
+                swprintf_s(hex, L" #%02X%02X%02X", int(extras[i][0] * 255 + .5f), int(extras[i][1] * 255 + .5f), int(extras[i][2] * 255 + .5f));
+                list += hex;
+            }
+            Log(L"dxgi: extra flat colors:%s", list.empty() ? L" none" : list.c_str());
+        }
+        memcpy(chain.extra, extras, sizeof extras);
+        chain.extraCount = extraCount;
         const bool changed = !chain.haveBackground || found[0] != chain.background[0] || found[1] != chain.background[1] || found[2] != chain.background[2];
         for (int i = 0; i < 3; ++i) chain.background[i] = found[i];
         if (changed)
@@ -518,10 +531,10 @@ float4 PS(float4 position : SV_Position) : SV_Target
         if (FAILED(device->CreateRenderTargetView(frame.Get(), nullptr, &target))) { chain.unsupported = true; ReleaseSRWLockExclusive(&g_lock); return; }
         context->CopyResource(chain.copy.Get(), frame.Get());
         Params params{ { chain.background[0], chain.background[1], chain.background[2] }, BackgroundFloor };
-        if (chain.haveBackground2)
+        for (UINT32 e = 0; e < chain.extraCount; ++e)
         {
-            for (int i = 0; i < 3; ++i) params.background2[i] = chain.background2[i];
-            params.background2[3] = 1;
+            for (int i = 0; i < 3; ++i) params.extra[e][i] = chain.extra[e][i];
+            params.extra[e][3] = 1;
         }
         ReadKeepAreas(params);
         TrimKeepAreas(device.Get(), context.Get(), frame.Get(), chain, params);
