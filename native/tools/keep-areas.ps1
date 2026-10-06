@@ -1,9 +1,15 @@
 # Dev tool for the experimental DXGI glass (hook/dxgiglass.cpp): finds areas of an app that must stay solid with UI
-# Automation and publishes them every half second in Local\GlassForge.DxgiKeep.<pid>, where the hook reads them. It follows the app across restarts. By default
-# that is LogMeIn Resolve's remote screen: the session page's <video> element (AutomationId ending in
-# "VideoStream_Video"), which only shows up in the raw view. Runs until the stop file appears.
+# Automation and publishes them every half second in Local\GlassForge.DxgiKeep.<pid>, where the hook reads them. It
+# follows the app across restarts. By default that is LogMeIn Resolve's remote screen: the session page's <video>
+# element (AutomationId ending in "VideoStream_Video", visible only in the raw view).
+#
+# LogMeIn's embedded Chromium stops reporting the inside of the session page after full screen is toggled (the page
+# itself stays visible to UI Automation, its contents don't). So while the video element is visible, its position
+# inside the session page is remembered as insets from the page's edges, and when the element is gone the same insets
+# are applied to the page's current rectangle. Runs until the stop file appears.
 param(
     [string] $Process = 'ra-technician-console',
+    [string] $DocumentPrefix = 'session',
     [string] $AutomationIdSuffix = 'VideoStream_Video',
     [string] $StopFile = "$env:LOCALAPPDATA\GlassForge\hook.stop"
 )
@@ -11,6 +17,7 @@ Add-Type -Namespace Ka -Name W -MemberDefinition @'
 [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr value);
 [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr window, ref POINT point);
 [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr window, out RECT rect);
+[DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr window, out RECT rect);
 public struct POINT { public int X, Y; }
 public struct RECT { public int Left, Top, Right, Bottom; }
 '@
@@ -18,28 +25,34 @@ public struct RECT { public int Left, Top, Right, Bottom; }
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
 
 $walker = [Windows.Automation.TreeWalker]::RawViewWalker
+$documents = New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::Document)
 
-# Depth-first through the raw view; the remote screen is ~25 levels down inside the web console.
-function Find-Element($element, [int] $depth) {
+function Find-Video($element, [int] $depth) {
     if ($depth -gt 40) { return $null }
     $child = $walker.GetFirstChild($element)
     while ($child) {
         if ($child.Current.AutomationId.EndsWith($AutomationIdSuffix)) { return $child }
-        $found = Find-Element $child ($depth + 1)
+        $found = Find-Video $child ($depth + 1)
         if ($found) { return $found }
         $child = $walker.GetNextSibling($child)
     }
     return $null
 }
 
+function Find-SessionPage($window) {
+    $root = [Windows.Automation.AutomationElement]::FromHandle($window)
+    foreach ($doc in $root.FindAll([Windows.Automation.TreeScope]::Descendants, $documents)) {
+        if ($doc.Current.Name.StartsWith($DocumentPrefix)) { return $doc }
+    }
+    return $null
+}
+
 $last = ''
 $targetId = 0
-$lastFrame = ''
-$lostAt = $null
 $mapping = $null
 $view = $null
-$element = $null
-$searched = [datetime]::MinValue
+$lastFrame = ''
+$insets = $null # remote screen's distance from the session page's left, top, right and bottom edges
 while (-not (Test-Path $StopFile)) {
     # Follow the app across restarts: a new process gets a new mapping (the name carries its pid).
     $target = Get-Process -Name $Process -ErrorAction SilentlyContinue | Where-Object MainWindowHandle -ne 0 | Select-Object -First 1
@@ -50,8 +63,8 @@ while (-not (Test-Path $StopFile)) {
         $window = $target.MainWindowHandle
         $mapping = [IO.MemoryMappedFiles.MemoryMappedFile]::CreateOrOpen("Local\GlassForge.DxgiKeep.$targetId", 4 + 8 * 16)
         $view = $mapping.CreateViewAccessor()
-        $element = $null
         $last = ''
+        $insets = $null
         Write-Output "$(Get-Date -Format HH:mm:ss) publishing keep areas for $Process (pid $targetId, window $window)"
     }
     # While the window moves or resizes, UI Automation and the window position are read at slightly different moments,
@@ -60,34 +73,43 @@ while (-not (Test-Path $StopFile)) {
     [void][Ka.W]::GetWindowRect($window, [ref]$frame)
     $frameText = "$($frame.Left),$($frame.Top),$($frame.Right),$($frame.Bottom)"
     if ($frameText -ne $lastFrame) { $lastFrame = $frameText; Start-Sleep -Milliseconds 250; continue }
+
     $rects = @()
+    $source = ''
     try {
-        # Reuse the element while it lives; look again every half second when there is none, so a new session is covered
-        # fast, and every 3 s anyway: LogMeIn rebuilds the video element when full screen toggles, and the old one lingers.
-        $age = ([datetime]::Now - $searched).TotalSeconds
-        if ((-not $element -and $age -ge 0.5) -or $age -ge 3) {
-            $searched = [datetime]::Now
-            $element = Find-Element ([Windows.Automation.AutomationElement]::FromHandle($window)) 0
-        }
-        if ($element) {
-            $r = $element.Current.BoundingRectangle
-            # A replaced element can stay reachable with an empty rectangle: drop it and search again at once.
-            if ($r.IsEmpty -or $r.Width -lt 1) { $element = $null; $searched = [datetime]::MinValue; $lostAt = [datetime]::Now }
-            else {
-                $origin = New-Object Ka.W+POINT
-                [void][Ka.W]::ClientToScreen($window, [ref]$origin)
-                $rects += , @([int]($r.Left - $origin.X), [int]($r.Top - $origin.Y), [int]($r.Right - $origin.X), [int]($r.Bottom - $origin.Y))
+        $origin = New-Object Ka.W+POINT
+        [void][Ka.W]::ClientToScreen($window, [ref]$origin)
+        $client = New-Object Ka.W+RECT
+        [void][Ka.W]::GetClientRect($window, [ref]$client)
+        $page = Find-SessionPage $window
+        if ($page) {
+            $p = $page.Current.BoundingRectangle
+            $video = Find-Video $page 0
+            $v = if ($video) { $video.Current.BoundingRectangle } else { $null }
+            # A real video rectangle is non-empty, inside the window, and inside its page (after full screen ends, the
+            # old element lingers for seconds with its full-screen size).
+            $videoOk = $v -and -not $v.IsEmpty -and $v.Width -ge 1 -and $v.Width -le $client.Right + 8 -and $v.Height -le $client.Bottom + 8 `
+                -and $v.Left -ge $p.Left - 2 -and $v.Top -ge $p.Top - 2 -and $v.Right -le $p.Right + 2 -and $v.Bottom -le $p.Bottom + 2
+            if ($videoOk) {
+                $insets = @(($v.Left - $p.Left), ($v.Top - $p.Top), ($p.Right - $v.Right), ($p.Bottom - $v.Bottom))
+                $box = @($v.Left, $v.Top, $v.Right, $v.Bottom)
+                $source = 'video'
+            } elseif ($insets -and -not $p.IsEmpty) {
+                $box = @(($p.Left + $insets[0]), ($p.Top + $insets[1]), ($p.Right - $insets[2]), ($p.Bottom - $insets[3]))
+                $source = 'page+insets'
+            } elseif (-not $p.IsEmpty) {
+                $box = @($p.Left, $p.Top, $p.Right, $p.Bottom) # nothing better known yet: the whole session page stays solid
+                $source = 'page'
+            }
+            if ($source) {
+                $rects += , @([int]($box[0] - $origin.X), [int]($box[1] - $origin.Y), [int]($box[2] - $origin.X), [int]($box[3] - $origin.Y))
             }
         }
-    } catch { $element = $null } # the session closed: the element is gone
-    # Keep publishing the last area for up to 2 s while a replaced element is looked up again, so the remote screen
-    # doesn't show through mid-transition.
-    if (-not $element -and $lostAt -and ([datetime]::Now - $lostAt).TotalSeconds -lt 2) { Start-Sleep -Milliseconds 100; continue }
-    if ($element) { $lostAt = $null }
+    } catch { }
     for ($i = 0; $i -lt $rects.Count; $i++) { for ($j = 0; $j -lt 4; $j++) { $view.Write(4 + $i * 16 + $j * 4, [int]$rects[$i][$j]) } }
     $view.Write(0, [int]$rects.Count)
     $now = ($rects | ForEach-Object { "[" + ($_ -join ",") + "]" }) -join " "
-    if ($now -ne $last) { Write-Output "$(Get-Date -Format HH:mm:ss) keep: $(if ($now) { $now } else { 'none' })"; $last = $now }
+    if ($now -ne $last) { Write-Output "$(Get-Date -Format HH:mm:ss) keep: $(if ($now) { "$now from $source" } else { 'none' })"; $last = $now }
     Start-Sleep -Milliseconds 500
 }
 if ($view) { $view.Dispose(); $mapping.Dispose() }
