@@ -66,12 +66,13 @@ namespace
     }
     bool g_installed = false;
     SRWLOCK g_lock = SRWLOCK_INIT;
+    SRWLOCK g_windowLock = SRWLOCK_INIT; // g_originalProcs only, taken on every window message
 
     // How much of the background stays: 0 = fully clear, 1 = untouched. A little keeps text readable on busy wallpaper.
     constexpr float BackgroundFloor = 0.12f;
     // When to look for the background color: a few times early (apps show a splash screen in a different color first),
     // then every 600 frames in case the app switches theme.
-    bool DetectNow(unsigned frame) { return frame == 0 || frame == 30 || frame == 120 || frame == 300 || frame % 600 == 0; }
+    bool DetectNow(unsigned frame) { return frame == 0 || frame == 30 || frame == 120 || frame == 300 || frame % 1800 == 0; }
 
     constexpr char ShaderSource[] = R"(
 cbuffer Params : register(b0) { float3 Background; float Floor; uint KeepCount; uint ClearCount; uint2 Padding; int4 Keep[8]; int4 Clear[8]; float4 Background2; };
@@ -190,6 +191,8 @@ float4 PS(float4 position : SV_Position) : SV_Target
         unsigned frames = 0;
         bool logged = false;
         bool unsupported = false;
+        ComPtr<ID3D11Texture2D> detectStaging;
+        bool detectPending = false;
         // Letterbox trimming of the keep-solid areas: a video shown "contained" (LogMeIn's remote screen) has black
         // bars that belong to the same element. A copy of the areas is read back without stalling, and each area
         // shrinks to its rows and columns that aren't pure black.
@@ -226,13 +229,13 @@ float4 PS(float4 position : SV_Position) : SV_Target
         constexpr LONG Edge = 4;
         auto rowLit = [&](LONG y) {
             LONG count = 0;
-            for (LONG x = area.left + Edge; x < area.right - Edge; ++x) count += lit(x, y);
-            return count > std::max<LONG>(2, (area.right - area.left) / 100);
+            for (LONG x = area.left + Edge; x < area.right - Edge; x += 2) count += lit(x, y);
+            return count > std::max<LONG>(2, (area.right - area.left) / 200);
         };
         auto columnLit = [&](LONG x, LONG top, LONG bottom) {
             LONG count = 0;
-            for (LONG y = top + Edge; y < bottom - Edge; ++y) count += lit(x, y);
-            return count > std::max<LONG>(2, (bottom - top) / 100);
+            for (LONG y = top + Edge; y < bottom - Edge; y += 2) count += lit(x, y);
+            return count > std::max<LONG>(2, (bottom - top) / 200);
         };
         RECT result = area;
         while (result.top < result.bottom && !rowLit(result.top)) ++result.top;
@@ -281,7 +284,7 @@ float4 PS(float4 position : SV_Position) : SV_Target
             }
         }
         const bool current = chain.trimCount == params.keepCount && SameRects(areas, chain.trimSource, params.keepCount);
-        if (!chain.trimPending && (!current || ++chain.trimAge >= 30))
+        if (!chain.trimPending && (!current || ++chain.trimAge >= 60))
         {
             chain.trimAge = 0;
             D3D11_TEXTURE2D_DESC stagingDesc{};
@@ -384,20 +387,35 @@ float4 PS(float4 position : SV_Position) : SV_Target
         return format == DXGI_FORMAT_B8G8R8A8_UNORM || format == DXGI_FORMAT_R8G8B8A8_UNORM;
     }
 
-    // The background is the most common color on a coarse grid of the untouched frame.
-    void DetectBackground(ID3D11Device* device, ID3D11DeviceContext* context, ID3D11Texture2D* frame, ChainResources& chain)
+    // The background is the most common color on a coarse grid of the untouched frame. Never stalls the app: a copy is
+    // started when asked (start), and read on a later frame once the GPU has finished it.
+    void DetectBackground(ID3D11Device* device, ID3D11DeviceContext* context, ID3D11Texture2D* frame, ChainResources& chain, bool start)
     {
         D3D11_TEXTURE2D_DESC desc{};
         frame->GetDesc(&desc);
-        desc.BindFlags = 0;
-        desc.MiscFlags = 0;
-        desc.Usage = D3D11_USAGE_STAGING;
-        desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-        ComPtr<ID3D11Texture2D> staging;
-        if (FAILED(device->CreateTexture2D(&desc, nullptr, &staging))) return;
-        context->CopyResource(staging.Get(), frame);
+        if (start && !chain.detectPending)
+        {
+            D3D11_TEXTURE2D_DESC have{};
+            if (chain.detectStaging) chain.detectStaging->GetDesc(&have);
+            if (!chain.detectStaging || have.Width != desc.Width || have.Height != desc.Height || have.Format != desc.Format)
+            {
+                D3D11_TEXTURE2D_DESC stagingDesc = desc;
+                stagingDesc.BindFlags = 0;
+                stagingDesc.MiscFlags = 0;
+                stagingDesc.Usage = D3D11_USAGE_STAGING;
+                stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+                chain.detectStaging.Reset();
+                if (FAILED(device->CreateTexture2D(&stagingDesc, nullptr, &chain.detectStaging))) return;
+            }
+            context->CopyResource(chain.detectStaging.Get(), frame);
+            chain.detectPending = true;
+            return;
+        }
+        if (!chain.detectPending) return;
+        chain.detectStaging->GetDesc(&desc);
         D3D11_MAPPED_SUBRESOURCE mapped{};
-        if (FAILED(context->Map(staging.Get(), 0, D3D11_MAP_READ, 0, &mapped))) return;
+        if (context->Map(chain.detectStaging.Get(), 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &mapped) != S_OK) return;
+        chain.detectPending = false;
         std::map<UINT32, unsigned> counts;
         unsigned samples = 0;
         for (UINT y = desc.Height / 20; y < desc.Height; y += desc.Height / 20 + 1)
@@ -407,7 +425,7 @@ float4 PS(float4 position : SV_Position) : SV_Target
                 ++counts[pixel];
                 ++samples;
             }
-        context->Unmap(staging.Get(), 0);
+        context->Unmap(chain.detectStaging.Get(), 0);
         UINT32 best = 0, second = 0;
         unsigned bestCount = 0, secondCount = 0;
         for (const auto& [pixel, count] : counts)
@@ -511,7 +529,7 @@ float4 PS(float4 position : SV_Position) : SV_Target
             chain.height = frameDesc.Height;
             chain.format = frameDesc.Format;
         }
-        if (DetectNow(chain.frames++)) DetectBackground(device.Get(), context.Get(), frame.Get(), chain);
+        DetectBackground(device.Get(), context.Get(), frame.Get(), chain, DetectNow(chain.frames++));
         if (!chain.haveBackground) { ReleaseSRWLockExclusive(&g_lock); return; }
 
         ComPtr<ID3D11RenderTargetView> target;
@@ -567,9 +585,9 @@ float4 PS(float4 position : SV_Position) : SV_Target
 
     HRESULT WINAPI Hook_DwmExtendFrameIntoClientArea(HWND window, const MARGINS* margins)
     {
-        AcquireSRWLockShared(&g_lock);
+        AcquireSRWLockShared(&g_windowLock);
         const bool kept = g_originalProcs.count(window) != 0;
-        ReleaseSRWLockShared(&g_lock);
+        ReleaseSRWLockShared(&g_windowLock);
         if (!kept) return Real_DwmExtendFrameIntoClientArea(window, margins);
         static const MARGINS whole{ -1, -1, -1, -1 };
         return Real_DwmExtendFrameIntoClientArea(window, &whole);
@@ -577,10 +595,10 @@ float4 PS(float4 position : SV_Position) : SV_Target
 
     LRESULT CALLBACK KeepFrameActive(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
     {
-        AcquireSRWLockShared(&g_lock);
+        AcquireSRWLockShared(&g_windowLock);
         const auto it = g_originalProcs.find(window);
         const WNDPROC original = it == g_originalProcs.end() ? DefWindowProcW : it->second;
-        ReleaseSRWLockShared(&g_lock);
+        ReleaseSRWLockShared(&g_windowLock);
         if (message == WM_NCACTIVATE) return CallWindowProcW(original, window, message, TRUE, lParam);
         // Under the composition layer the window keeps its ordinary GDI surface. The app never paints it (it draws
         // with DXGI), so when the window grows Windows fills the new part white, which shows through every see-through
@@ -601,14 +619,14 @@ float4 PS(float4 position : SV_Position) : SV_Target
         if (message == WM_NCDESTROY)
         {
             SetWindowLongPtrW(window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(original));
-            AcquireSRWLockExclusive(&g_lock);
+            AcquireSRWLockExclusive(&g_windowLock);
             g_originalProcs.erase(window);
-            ReleaseSRWLockExclusive(&g_lock);
+            ReleaseSRWLockExclusive(&g_windowLock);
         }
         return CallWindowProcW(original, window, message, wParam, lParam);
     }
 
-    // Called with g_lock held exclusively. Window procedures can be swapped from any thread of the process, which
+    // Called with g_windowLock held exclusively. Window procedures can be swapped from any thread of the process, which
     // matters because apps often create their swap chain off the window's thread.
     void KeepActiveLocked(HWND window)
     {
@@ -672,9 +690,9 @@ float4 PS(float4 position : SV_Position) : SV_Target
             return false;
         }
         Log(L"dxgi: window %p now shows a composition swap chain %p (%ux%u format %d)", window, composed.Get(), desc.Width, desc.Height, desc.Format);
-        AcquireSRWLockExclusive(&g_lock);
+        AcquireSRWLockExclusive(&g_windowLock);
         KeepActiveLocked(GetAncestor(window, GA_ROOT));
-        ReleaseSRWLockExclusive(&g_lock);
+        ReleaseSRWLockExclusive(&g_windowLock);
         AcquireSRWLockExclusive(&g_lock);
         g_chainWindows[composed.Get()] = window;
         ReleaseSRWLockExclusive(&g_lock);

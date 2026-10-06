@@ -53,6 +53,11 @@ $mapping = $null
 $view = $null
 $lastFrame = ''
 $insets = $null # remote screen's distance from the session page's left, top, right and bottom edges
+# Found elements are reused and only their rectangles re-read; walking LogMeIn's page tree means many calls into its
+# own threads, so a full search happens only every 3 s, when something is lost, or after the window settles.
+$page = $null
+$video = $null
+$searched = [datetime]::MinValue
 while (-not (Test-Path $StopFile)) {
     # Follow the app across restarts: a new process gets a new mapping (the name carries its pid).
     $target = Get-Process -Name $Process -ErrorAction SilentlyContinue | Where-Object MainWindowHandle -ne 0 | Select-Object -First 1
@@ -72,7 +77,7 @@ while (-not (Test-Path $StopFile)) {
     $frame = New-Object Ka.W+RECT
     [void][Ka.W]::GetWindowRect($window, [ref]$frame)
     $frameText = "$($frame.Left),$($frame.Top),$($frame.Right),$($frame.Bottom)"
-    if ($frameText -ne $lastFrame) { $lastFrame = $frameText; Start-Sleep -Milliseconds 250; continue }
+    if ($frameText -ne $lastFrame) { $lastFrame = $frameText; $searched = [datetime]::MinValue; Start-Sleep -Milliseconds 250; continue }
 
     $rects = @()
     $source = ''
@@ -81,11 +86,15 @@ while (-not (Test-Path $StopFile)) {
         [void][Ka.W]::ClientToScreen($window, [ref]$origin)
         $client = New-Object Ka.W+RECT
         [void][Ka.W]::GetClientRect($window, [ref]$client)
-        $page = Find-SessionPage $window
+        if (-not $page -or ([datetime]::Now - $searched).TotalSeconds -ge 3) {
+            $searched = [datetime]::Now
+            $page = Find-SessionPage $window
+            $video = if ($page) { Find-Video $page 0 } else { $null }
+        }
         if ($page) {
             $p = $page.Current.BoundingRectangle
-            $video = Find-Video $page 0
-            $v = if ($video) { $video.Current.BoundingRectangle } else { $null }
+            $v = $null
+            if ($video) { try { $v = $video.Current.BoundingRectangle } catch { $video = $null } }
             # A real video rectangle is non-empty, inside the window, and inside its page (after full screen ends, the
             # old element lingers for seconds with its full-screen size).
             $videoOk = $v -and -not $v.IsEmpty -and $v.Width -ge 1 -and $v.Width -le $client.Right + 8 -and $v.Height -le $client.Bottom + 8 `
@@ -105,7 +114,7 @@ while (-not (Test-Path $StopFile)) {
                 $rects += , @([int]($box[0] - $origin.X), [int]($box[1] - $origin.Y), [int]($box[2] - $origin.X), [int]($box[3] - $origin.Y))
             }
         }
-    } catch { }
+    } catch { $page = $null; $video = $null } # gone: search again next time
     for ($i = 0; $i -lt $rects.Count; $i++) { for ($j = 0; $j -lt 4; $j++) { $view.Write(4 + $i * 16 + $j * 4, [int]$rects[$i][$j]) } }
     $view.Write(0, [int]$rects.Count)
     $now = ($rects | ForEach-Object { "[" + ($_ -join ",") + "]" }) -join " "
