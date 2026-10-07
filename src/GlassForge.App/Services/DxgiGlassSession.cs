@@ -235,7 +235,12 @@ internal sealed record KeepSolidRule(string? DocumentPrefix, string? AutomationI
     // Every app keeps its pictures solid (a photo's colors near the background would turn grey and see-through);
     // LogMeIn Resolve also keeps its remote screen, the session page's <video> element.
     internal static IReadOnlyList<KeepSolidRule> For(string processName) =>
-        string.Equals(processName, "ra-technician-console", StringComparison.OrdinalIgnoreCase)
+        // ChatGPT's delayed accessibility positions leave solid black rectangles
+        // behind pictures while scrolling. Keep those masks disabled for now.
+        string.Equals(processName, "ChatGPT Classic", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(processName, "ChatGPT", StringComparison.OrdinalIgnoreCase)
+            ? []
+            : string.Equals(processName, "ra-technician-console", StringComparison.OrdinalIgnoreCase)
             ? [new KeepSolidRule("session", "VideoStream_Video", false), new KeepSolidRule(null, null, true)]
             : [new KeepSolidRule(null, null, true)];
 }
