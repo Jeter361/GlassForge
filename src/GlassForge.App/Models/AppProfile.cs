@@ -61,10 +61,9 @@ public sealed class AppProfile : INotifyPropertyChanged
     /// content covers, so it only shows once extended into the whole window.
     /// </summary>
     private static readonly HashSet<string> OwnTitleBarApps = new(StringComparer.OrdinalIgnoreCase) { "notepad" };
-    /// <summary>Apps the opt-in hook makes glass (WINWORD, EXCEL, POWERPNT, ms-teams). Office apps get their own
-    /// Mica brush swapped; Teams gets its native chrome shown live via the host-backdrop opt-in (its WebView2 chat
-    /// pane stays opaque).</summary>
-    private static readonly HashSet<string> OfficeApps = new(StringComparer.OrdinalIgnoreCase) { "WINWORD", "EXCEL", "POWERPNT", "ms-teams" };
+    /// <summary>Apps the opt-in hook makes glass (WINWORD, EXCEL, POWERPNT): each gets its own Mica brush swapped.
+    /// Teams is not one of them: it takes "Glass inside the app" like the new Outlook (WebView2).</summary>
+    private static readonly HashSet<string> OfficeApps = new(StringComparer.OrdinalIgnoreCase) { "WINWORD", "EXCEL", "POWERPNT" };
     [JsonIgnore] public bool IsNotepad => string.Equals(ProcessName, "notepad", StringComparison.OrdinalIgnoreCase);
     [JsonIgnore] public bool DrawsOwnTitleBar => OwnTitleBarApps.Contains(ProcessName);
     /// <summary>Last known full path of the app's exe, for its icon while the app isn't running.</summary>
@@ -95,7 +94,6 @@ public sealed class AppProfile : INotifyPropertyChanged
         "WINWORD" => "Word",
         "EXCEL" => "Excel",
         "POWERPNT" => "PowerPoint",
-        "MS-TEAMS" => "Teams",
         _ => "Office"
     };
     /// <summary>The Office app's executable name for the toggle's warning text.</summary>
@@ -109,7 +107,6 @@ public sealed class AppProfile : INotifyPropertyChanged
         IsExplorer ? "Glass behind the file list, navigation pane, scrollbars and toolbar, not just the title bar."
         : IsTerminal ? "Live glass behind the tab row only; needs a Terminal theme with a transparent tab row."
         : IsSettings ? "Swaps Settings' static Mica for a live blur, animated wallpapers included."
-        : string.Equals(ProcessName, "ms-teams", StringComparison.OrdinalIgnoreCase) ? "Live glass on Teams' title bar and frame; the chat pane stays solid."
         : $"Swaps {OfficeDisplayName}'s static Mica for a live blur. The first click on a window may only activate it.";
     /// <summary>The red warning under the toggle: this is the one feature that injects code.</summary>
     [JsonIgnore] public string HookWarning =>
