@@ -946,6 +946,10 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID)
             SetEnvironmentVariableW(L"GLASSFORGE_DXGI_TUNING", L"0.45 0");
             StartWebViewGlass();
         }
+        // ChatGPT (Electron, color-keyed): darker glass, and only colors within a few shades of its background turn
+        // see-through, so pictures stay solid. Its GPU process inherits this.
+        if ((IsProcessNamed(L"ChatGPT Classic.exe") || IsProcessNamed(L"ChatGPT.exe")) && DxgiGlassRequested())
+            SetEnvironmentVariableW(L"GLASSFORGE_DXGI_TUNING", L"0.50 6");
         // The new Outlook: the same page-level glass, a little darker (asked for).
         if (IsProcessNamed(L"olk.exe") && DxgiGlassRequested())
         {

@@ -145,13 +145,6 @@ float4 PS(float4 position : SV_Position) : SV_Target
     float3 down = 0.5 * (b - c) / max(b, 1e-4);
     float3 need = max(max(up, down), 0);
     float alpha = max(saturate(max(max(need.r, need.g), need.b) * Gain), Floor);
-    // Tuned apps (Gain > 1, a near-black background): only colorless greys no lighter than the background are glass, so
-    // every darker flat panel goes too; anything else, photos included, is solid unless it is almost the background.
-    if (Gain > 1)
-    {
-        float spread = max(max(c.r, c.g), c.b) - min(min(c.r, c.g), c.b);
-        if (spread < 0.025 && all(c <= b + 0.02)) alpha = Floor;
-    }
     // Premultiplied foreground: the pixel minus the background's remaining share.
     float3 rgb = clamp(c - (1 - alpha) * b, 0, alpha);
     return float4(rgb, alpha);
