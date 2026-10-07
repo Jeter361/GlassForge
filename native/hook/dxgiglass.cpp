@@ -915,6 +915,13 @@ bool DxgiGlassRequested()
     return InList(list, name ? name + 1 : path);
 }
 
+void DxgiGlassHostWindow(HWND window)
+{
+    AcquireSRWLockExclusive(&g_windowLock);
+    KeepActiveLocked(window);
+    ReleaseSRWLockExclusive(&g_windowLock);
+}
+
 void InstallDxgiGlass()
 {
     AcquireSRWLockExclusive(&g_lock);

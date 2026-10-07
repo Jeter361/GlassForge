@@ -49,4 +49,8 @@ void Log(const wchar_t* format, ...)
         fclose(file);
     }
     ReleaseSRWLockExclusive(&g_lock);
+    // Sandboxed processes (a browser's GPU process) can't open the log file; the debug channel still gets the line.
+    wchar_t line[1200];
+    swprintf_s(line, L"GlassForge %s[%lu] %s\n", name ? name + 1 : exe, GetCurrentProcessId(), message);
+    OutputDebugStringW(line);
 }

@@ -1,4 +1,4 @@
-// GlassForge.Hook: loaded into one target app through a thread-scoped SetWindowsHookEx, so only the windows
+﻿// GlassForge.Hook: loaded into one target app through a thread-scoped SetWindowsHookEx, so only the windows
 // GlassForge was asked to style are affected.
 //
 // How the glass works: the hooked window gets an Acrylic system backdrop with its frame extended over the whole
@@ -14,6 +14,7 @@
 #include <d2d1.h>
 #include <wrl/client.h>
 #include <array>
+#include <set>
 #include <cmath>
 #include <map>
 #include <string>
@@ -721,11 +722,41 @@ namespace
     }
 
     // Word, Excel and PowerPoint share Office's UI stack (mso40uiwin32client.dll builds the same Mica brush graph),
-    // so the same early detour and brush swap covers all three (office.cpp). Teams used to be routed here (frame-only
-    // glass); it now takes the DXGI glass through its WebView2 processes, like the new Outlook.
+    // so the same early detour and brush swap covers all three (office.cpp). Teams is routed here too: it also uses
+    // Windows.UI.Composition, and its own chrome and background are wallpaper/host backdrop brushes. On its own that
+    // only made the chrome glass; with the DXGI glass in its WebView2 processes (TeamsHostWatch) the content follows.
     bool IsOfficeProcess()
     {
-        return IsProcessNamed(L"WINWORD.EXE") || IsProcessNamed(L"EXCEL.EXE") || IsProcessNamed(L"POWERPNT.EXE");
+        return IsProcessNamed(L"WINWORD.EXE") || IsProcessNamed(L"EXCEL.EXE") || IsProcessNamed(L"POWERPNT.EXE")
+            || IsProcessNamed(L"ms-teams.exe");
+    }
+
+    // Teams with the DXGI glass: its WebView2 content is drawn by another process, so no swap chain of Teams' own ever
+    // marks the TeamsWebView host for glass, and Teams paints a solid background under the content. Each host window
+    // gets the host backdrop opt-in (Teams' brushes then render live) and the DXGI whole-window treatment.
+    DWORD WINAPI TeamsHostWatch(void*)
+    {
+        std::set<HWND> done;
+        for (;;)
+        {
+            EnumWindows([](HWND window, LPARAM param) -> BOOL {
+                DWORD pid = 0;
+                GetWindowThreadProcessId(window, &pid);
+                wchar_t name[32]{};
+                if (pid != GetCurrentProcessId() || !IsWindowVisible(window) || !GetClassNameW(window, name, _countof(name))
+                    || _wcsicmp(name, L"TeamsWebView") != 0)
+                    return TRUE;
+                auto& seen = *reinterpret_cast<std::set<HWND>*>(param);
+                if (!seen.insert(window).second) return TRUE;
+                const BOOL on = TRUE;
+                const HRESULT hr = DwmSetWindowAttribute(window, DWMWA_USE_HOSTBACKDROPBRUSH, &on, sizeof on);
+                DxgiGlassHostWindow(window);
+                Log(L"teams: host window %p gets glass (host backdrop %08X)", window, hr);
+                return TRUE;
+            }, reinterpret_cast<LPARAM>(&done));
+            for (auto it = done.begin(); it != done.end();) it = IsWindow(*it) ? std::next(it) : done.erase(it);
+            Sleep(500);
+        }
     }
 
     bool SurveyRequested()
@@ -884,6 +915,8 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID)
         Log(L"loaded");
         if (IsOfficeProcess()) StartOfficeHooksEarly();
         if (DxgiGlassRequested()) StartDxgiGlassEarly();
+        if (DxgiGlassRequested() && IsProcessNamed(L"ms-teams.exe"))
+            if (HANDLE thread = CreateThread(nullptr, 0, TeamsHostWatch, nullptr, 0, nullptr)) CloseHandle(thread);
         break;
     case DLL_PROCESS_DETACH:
         // Never leave detours (or a redirected UWP method) pointing into an unloaded DLL; GlassForge normally sends

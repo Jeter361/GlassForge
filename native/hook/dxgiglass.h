@@ -11,5 +11,8 @@ bool DxgiGlassRequested();
 void InstallDxgiGlass();
 // Same, from DllMain: on a thread of its own, so it is in place before the app creates its swap chains.
 void StartDxgiGlassEarly();
+// From any thread of the app: gives a host window whose content another process draws (Teams' TeamsWebView) the same
+// whole-window acrylic, black backing and drawn-as-active treatment a window with our own swap chain gets.
+void DxgiGlassHostWindow(HWND window);
 // Takes the detours out and frees the shader resources.
 void RemoveDxgiGlass();
