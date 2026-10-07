@@ -179,24 +179,6 @@ namespace
                 if (SUCCEEDED(result)) PatchEnvironment(environment);
                 return keep ? keep->Invoke(result, environment) : S_OK;
             });
-        // Diagnostics only: %LOCALAPPDATA%\GlassForge\webdebug.txt opens DevTools on 127.0.0.1:<port in the file>.
-        wchar_t marker[MAX_PATH]{};
-        if (options && GetEnvironmentVariableW(L"LOCALAPPDATA", marker, MAX_PATH))
-        {
-            wcscat_s(marker, L"\\GlassForge\\webdebug.txt");
-            if (FILE* file = nullptr; _wfopen_s(&file, marker, L"r") == 0 && file)
-            {
-                int port = 0;
-                fwscanf_s(file, L"%d", &port);
-                fclose(file);
-                LPWSTR current = nullptr;
-                options->get_AdditionalBrowserArguments(&current);
-                wchar_t arguments[4096]{};
-                swprintf_s(arguments, L"%s --remote-debugging-port=%d --remote-debugging-address=127.0.0.1", current ? current : L"", port > 0 ? port : 9333);
-                if (current) CoTaskMemFree(current);
-                Log(L"web glass: DevTools on port %d (%08X)", port > 0 ? port : 9333, options->put_AdditionalBrowserArguments(arguments));
-            }
-        }
         Log(L"web glass: environment requested");
         return Real_CreateEnvironment(browserFolder, userDataFolder, options, wrapped.Get());
     }
