@@ -109,6 +109,9 @@ float4 PS(float4 position : SV_Position) : SV_Target
     if (Gain == 0)
     {
         float4 s = Frame.Load(int3(position.xy, 0));
+        // Valid premultiplied color never exceeds its alpha. Under some overlays (the picture viewer's dimming) it does,
+        // and DWM then adds it onto the glass as a glow; such pixels get the alpha their color needs.
+        s.a = max(s.a, max(max(s.r, s.g), s.b));
         return s + (1 - s.a) * float4(0, 0, 0, Floor);
     }
     float3 c = Frame.Load(int3(position.xy, 0)).rgb;

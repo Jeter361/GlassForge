@@ -752,6 +752,8 @@ namespace
                 const BOOL on = TRUE;
                 const HRESULT hr = DwmSetWindowAttribute(window, DWMWA_USE_HOSTBACKDROPBRUSH, &on, sizeof on);
                 DxgiGlassHostWindow(window);
+                // The whole-window frame makes DWM draw its own caption buttons over Teams' (as in Windows Terminal).
+                SetSysMenu(window, false);
                 Log(L"teams: host window %p gets glass (host backdrop %08X)", window, hr);
                 return TRUE;
             }, reinterpret_cast<LPARAM>(&done));

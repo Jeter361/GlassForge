@@ -195,7 +195,10 @@ HRESULT STDMETHODCALLTYPE Hook_PutSystemBackdrop(ICompositionSupportsSystemBackd
         backdrop = g_backdropEffects.count(effect.Get()) != 0;
         ReleaseSRWLockShared(&g_lock);
     }
-    Log(L"office: system backdrop on %p: %p%s", self, brush, backdrop ? L" (Teams' backdrop, left clear)" : L"");
+    // Teams' controller also swaps in a flat fill while the window is inactive (it went black on focus loss): with the
+    // backdrop cleared, nothing of Teams' own goes into the slot at all, so GlassForge's acrylic shows in every state.
+    if (g_clearBackdrop && brush) backdrop = true;
+    Log(L"office: system backdrop on %p: %p%s", self, brush, backdrop ? L" (left clear)" : L"");
     return Real_PutSystemBackdrop(self, backdrop ? nullptr : brush);
 }
 
