@@ -18,6 +18,8 @@
 #include <wrl/wrappers/corewrappers.h>
 #include <DispatcherQueue.h>
 #include <windows.ui.composition.h>
+#include <windows.ui.composition.desktop.h>
+#include <windows.ui.composition.interop.h>
 #include <windows.system.h>
 #include <intrin.h>
 #include <set>
@@ -42,12 +44,18 @@ using CreateFactoryWithProperties = HRESULT(STDMETHODCALLTYPE*)(void* self, IGra
     ABI::Windows::Foundation::Collections::IIterable<HSTRING>* properties, ICompositionEffectFactory** result);
 using FactoryCreateBrush = HRESULT(STDMETHODCALLTYPE*)(ICompositionEffectFactory* self, ICompositionEffectBrush** result);
 using SetSource = HRESULT(STDMETHODCALLTYPE*)(ICompositionEffectBrush* self, HSTRING name, ICompositionBrush* brush);
+using PutBrush = HRESULT(STDMETHODCALLTYPE*)(ISpriteVisual* self, ICompositionBrush* brush);
+using PutSystemBackdrop = HRESULT(STDMETHODCALLTYPE*)(ICompositionSupportsSystemBackdrop* self, ICompositionBrush* brush);
+using PutMaskSource = HRESULT(STDMETHODCALLTYPE*)(ICompositionMaskBrush* self, ICompositionBrush* source);
 // Vtable slots: IUnknown (3) + IInspectable (3), then each interface's methods in declaration order.
 constexpr int BlurredWallpaperSlot = 6; // ICompositorWithBlurredWallpaperBackdropBrush::TryCreateBlurredWallpaperBackdropBrush
 constexpr int CreateFactorySlot = 11;   // ICompositor::CreateEffectFactory
 constexpr int CreateFactoryWithPropertiesSlot = 12;
 constexpr int FactoryCreateBrushSlot = 6; // ICompositionEffectFactory::CreateBrush
 constexpr int SetSourceSlot = 7;          // ICompositionEffectBrush::SetSourceParameter
+constexpr int PutBrushSlot = 7;           // ISpriteVisual::put_Brush
+constexpr int PutMaskSourceSlot = 9;      // ICompositionMaskBrush::put_Source
+constexpr int PutSystemBackdropSlot = 7;  // ICompositionSupportsSystemBackdrop::put_SystemBackdrop
 constexpr UINT_PTR SubclassId = 0x4F464643; // 'OFFC'
 
 CreateBrush Real_BlurredWallpaper = nullptr;
@@ -55,6 +63,20 @@ CreateFactory Real_CreateFactory = nullptr;
 CreateFactoryWithProperties Real_CreateFactoryWithProperties = nullptr;
 FactoryCreateBrush Real_FactoryCreateBrush = nullptr;
 SetSource Real_SetSource = nullptr;
+PutBrush Real_PutBrush = nullptr;
+void** g_putBrushSlot = nullptr;
+PutMaskSource Real_PutMaskSource = nullptr;
+PutSystemBackdrop Real_PutSystemBackdrop = nullptr;
+void** g_putSystemBackdropSlot = nullptr;
+void** g_putMaskSourceSlot = nullptr;
+// Teams with the DXGI glass: the visuals painted with an effect built on a wallpaper brush (Teams' own backdrop, with
+// its dark tint and luminosity layers) get no brush at all, so GlassForge's acrylic behind the window shows as is.
+bool g_clearBackdrop = false;
+// Which visual each effect brush was put on, for an app that wires the effect's inputs after assigning it.
+struct Painted { ICompositionEffectBrush* effect; ComPtr<ISpriteVisual> visual; };
+std::vector<Painted> g_painted;
+// Effect brushes built on a wallpaper brush, directly or through another such effect (raw identities).
+std::set<void*> g_backdropEffects;
 void** g_factorySlot = nullptr; // patched vtable entries (shared by every instance of the class)
 void** g_setSourceSlot = nullptr;
 
@@ -125,12 +147,112 @@ HRESULT STDMETHODCALLTYPE Hook_SetSource(ICompositionEffectBrush* self, HSTRING 
         const std::wstring input = name ? WindowsGetStringRawBuffer(name, nullptr) : L"";
         bool known = false;
         for (const auto& entry : g_inputs) known |= entry.effect.Get() == self && entry.name == input;
-        if (!known) g_inputs.push_back({ self, input, i });
+        if (!known)
+        {
+            g_inputs.push_back({ self, input, i });
+            Log(L"office: effect %p input '%s' is a wallpaper brush", self, input.c_str());
+        }
         use = (g_glassOn ? g_pairs[i].glass : g_pairs[i].original).Get();
         break;
     }
+    // An effect fed by a wallpaper brush, or by such an effect, is a backdrop effect too.
+    bool ours = given && use != brush;
+    for (size_t i = 0; !ours && given && i < g_pairs.size(); ++i)
+        ours = given.Get() == g_pairs[i].original.Get() || given.Get() == g_pairs[i].glass.Get();
+    if (given && !ours)
+    {
+        ComPtr<ICompositionEffectBrush> inner;
+        if (SUCCEEDED(given.As(&inner)) && g_backdropEffects.count(inner.Get()))
+        {
+            ours = true;
+            Log(L"office: effect %p is built on backdrop effect %p", self, inner.Get());
+        }
+    }
+    if (ours) g_backdropEffects.insert(self);
+    // Already on a visual (put there before its inputs were set): take it off now.
+    std::vector<ComPtr<ISpriteVisual>> clear;
+    if (g_clearBackdrop && ours)
+        for (auto it = g_painted.begin(); it != g_painted.end();)
+            if (it->effect == self) { clear.push_back(it->visual); it = g_painted.erase(it); }
+            else ++it;
     ReleaseSRWLockExclusive(&g_lock);
-    return Real_SetSource(self, name, use);
+    const HRESULT hr = Real_SetSource(self, name, use);
+    for (const auto& visual : clear)
+    {
+        Real_PutBrush(visual.Get(), nullptr);
+        Log(L"office: backdrop visual %p cleared after its inputs were set", visual.Get());
+    }
+    return hr;
+}
+
+// A window target's system backdrop (how a Mica/acrylic controller attaches): Teams' own backdrop effect stays out.
+HRESULT STDMETHODCALLTYPE Hook_PutSystemBackdrop(ICompositionSupportsSystemBackdrop* self, ICompositionBrush* brush) {
+    bool backdrop = false;
+    ComPtr<ICompositionEffectBrush> effect;
+    if (brush && g_clearBackdrop && SUCCEEDED(brush->QueryInterface(IID_PPV_ARGS(&effect))))
+    {
+        AcquireSRWLockShared(&g_lock);
+        backdrop = g_backdropEffects.count(effect.Get()) != 0;
+        ReleaseSRWLockShared(&g_lock);
+    }
+    Log(L"office: system backdrop on %p: %p%s", self, brush, backdrop ? L" (Teams' backdrop, left clear)" : L"");
+    return Real_PutSystemBackdrop(self, backdrop ? nullptr : brush);
+}
+
+// A mask brush around a backdrop effect (Teams rounds its panels this way) is a backdrop brush too.
+HRESULT STDMETHODCALLTYPE Hook_PutMaskSource(ICompositionMaskBrush* self, ICompositionBrush* source) {
+    ComPtr<ICompositionEffectBrush> effect;
+    if (source && SUCCEEDED(source->QueryInterface(IID_PPV_ARGS(&effect))))
+    {
+        AcquireSRWLockExclusive(&g_lock);
+        const bool backdrop = g_backdropEffects.count(effect.Get()) != 0;
+        if (backdrop) g_backdropEffects.insert(self);
+        ReleaseSRWLockExclusive(&g_lock);
+        if (backdrop) Log(L"office: mask %p wraps backdrop effect %p", self, effect.Get());
+    }
+    return Real_PutMaskSource(self, source);
+}
+
+HRESULT STDMETHODCALLTYPE Hook_PutBrush(ISpriteVisual* self, ICompositionBrush* brush) {
+    static int logged = 0;
+    if (brush && g_clearBackdrop && logged < 0)
+    {
+        HSTRING kind = nullptr;
+        ComPtr<IInspectable> inspectable;
+        if (SUCCEEDED(brush->QueryInterface(IID_PPV_ARGS(&inspectable)))) inspectable->GetRuntimeClassName(&kind);
+        Log(L"office: sprite %p gets %s %p", self, kind ? WindowsGetStringRawBuffer(kind, nullptr) : L"?", brush);
+        if (kind) WindowsDeleteString(kind);
+        ++logged;
+    }
+    if (brush && g_clearBackdrop)
+    {
+        ComPtr<ICompositionEffectBrush> effect;
+        ComPtr<ICompositionMaskBrush> mask;
+        bool backdrop = false;
+        if (SUCCEEDED(brush->QueryInterface(IID_PPV_ARGS(&mask))))
+        {
+            AcquireSRWLockShared(&g_lock);
+            backdrop = g_backdropEffects.count(mask.Get()) != 0;
+            ReleaseSRWLockShared(&g_lock);
+        }
+        else if (SUCCEEDED(brush->QueryInterface(IID_PPV_ARGS(&effect))))
+        {
+            AcquireSRWLockExclusive(&g_lock);
+            backdrop = g_backdropEffects.count(effect.Get()) != 0;
+            if (!backdrop)
+            {
+                if (g_painted.size() >= 2048) g_painted.erase(g_painted.begin(), g_painted.begin() + 1024);
+                g_painted.push_back({ effect.Get(), self });
+            }
+            ReleaseSRWLockExclusive(&g_lock);
+        }
+        if (backdrop)
+        {
+            Log(L"office: backdrop visual %p left clear", self);
+            return Real_PutBrush(self, nullptr);
+        }
+    }
+    return Real_PutBrush(self, brush);
 }
 
 // SetSourceParameter is only reachable through an effect brush, so the first factory's CreateBrush leads to it.
@@ -185,6 +307,40 @@ DWORD WINAPI FindMethods(void*) {
             void** vtable = *reinterpret_cast<void***>(compositor.Get());
             Real_CreateFactory = static_cast<CreateFactory>(vtable[CreateFactorySlot]);
             Real_CreateFactoryWithProperties = static_cast<CreateFactoryWithProperties>(vtable[CreateFactoryWithPropertiesSlot]);
+            ComPtr<ISpriteVisual> sprite;
+            if (g_clearBackdrop && !g_putBrushSlot && SUCCEEDED(compositor->CreateSpriteVisual(&sprite)))
+            {
+                void** spriteTable = *reinterpret_cast<void***>(sprite.Get());
+                Real_PutBrush = reinterpret_cast<PutBrush>(spriteTable[PutBrushSlot]);
+                if (PatchSlot(&spriteTable[PutBrushSlot], reinterpret_cast<void*>(&Hook_PutBrush))) g_putBrushSlot = &spriteTable[PutBrushSlot];
+            }
+            // The window target's system backdrop slot, through a target on a throwaway window of this thread.
+            if (g_clearBackdrop && !g_putSystemBackdropSlot)
+            {
+                HWND probe = CreateWindowExW(WS_EX_NOREDIRECTIONBITMAP, L"STATIC", L"", WS_POPUP, 0, 0, 1, 1, nullptr, nullptr, nullptr, nullptr);
+                ComPtr<ABI::Windows::UI::Composition::Desktop::ICompositorDesktopInterop> interop;
+                ComPtr<ABI::Windows::UI::Composition::Desktop::IDesktopWindowTarget> target;
+                ComPtr<ICompositionSupportsSystemBackdrop> slot;
+                if (probe && SUCCEEDED(compositor.As(&interop)) && SUCCEEDED(interop->CreateDesktopWindowTarget(probe, FALSE, &target))
+                    && SUCCEEDED(target.As(&slot)))
+                {
+                    void** slotTable = *reinterpret_cast<void***>(slot.Get());
+                    Real_PutSystemBackdrop = reinterpret_cast<PutSystemBackdrop>(slotTable[PutSystemBackdropSlot]);
+                    if (PatchSlot(&slotTable[PutSystemBackdropSlot], reinterpret_cast<void*>(&Hook_PutSystemBackdrop)))
+                        g_putSystemBackdropSlot = &slotTable[PutSystemBackdropSlot];
+                }
+                Log(L"office: system backdrop slot %s", g_putSystemBackdropSlot ? L"watched" : L"not found");
+                target.Reset();
+                if (probe) DestroyWindow(probe);
+            }
+            ComPtr<ICompositor2> compositor2;
+            ComPtr<ICompositionMaskBrush> mask;
+            if (g_clearBackdrop && !g_putMaskSourceSlot && SUCCEEDED(compositor.As(&compositor2)) && SUCCEEDED(compositor2->CreateMaskBrush(&mask)))
+            {
+                void** maskTable = *reinterpret_cast<void***>(mask.Get());
+                Real_PutMaskSource = reinterpret_cast<PutMaskSource>(maskTable[PutMaskSourceSlot]);
+                if (PatchSlot(&maskTable[PutMaskSourceSlot], reinterpret_cast<void*>(&Hook_PutMaskSource))) g_putMaskSourceSlot = &maskTable[PutMaskSourceSlot];
+            }
         }
         Log(L"office: compositor methods %08X (%p in %s)", hr, Real_BlurredWallpaper, Real_BlurredWallpaper ? CallerModule(Real_BlurredWallpaper) : L"-");
     }
@@ -285,6 +441,8 @@ void InstallOfficeHooks() {
 
 // Called from DllMain: the DLL lands in the Office process well before the hooked UI thread runs any hook code, and Office makes its
 // wallpaper brushes in that gap. A thread of our own installs the detour at once (it starts after the loader lock).
+void ClearOfficeBackdrop() { g_clearBackdrop = true; }
+
 void StartOfficeHooksEarly() {
     if (HANDLE thread = CreateThread(nullptr, 0, [](void*) -> DWORD { InstallOfficeHooks(); return 0; }, nullptr, 0, nullptr))
         CloseHandle(thread);
@@ -312,6 +470,9 @@ void RemoveOfficeHooks() {
     }
     if (g_setSourceSlot && PatchSlot(g_setSourceSlot, reinterpret_cast<void*>(Real_SetSource))) g_setSourceSlot = nullptr;
     if (g_factorySlot && PatchSlot(g_factorySlot, reinterpret_cast<void*>(Real_FactoryCreateBrush))) g_factorySlot = nullptr;
+    if (g_putBrushSlot && PatchSlot(g_putBrushSlot, reinterpret_cast<void*>(Real_PutBrush))) g_putBrushSlot = nullptr;
+    if (g_putSystemBackdropSlot && PatchSlot(g_putSystemBackdropSlot, reinterpret_cast<void*>(Real_PutSystemBackdrop))) g_putSystemBackdropSlot = nullptr;
+    if (g_putMaskSourceSlot && PatchSlot(g_putMaskSourceSlot, reinterpret_cast<void*>(Real_PutMaskSource))) g_putMaskSourceSlot = nullptr;
     ReleaseSRWLockExclusive(&g_lock);
 }
 

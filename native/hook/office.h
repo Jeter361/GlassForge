@@ -6,6 +6,8 @@
 void InstallOfficeHooks();
 // From DllMain in an Office process (WINWORD/EXCEL/POWERPNT): InstallOfficeHooks on a new thread, without waiting.
 void StartOfficeHooksEarly();
+// Before StartOfficeHooksEarly: visuals painted with the app's own backdrop effect get no brush (Teams with DXGI glass).
+void ClearOfficeBackdrop();
 // Turns the glass off: Office's own brushes go back into every input; the detours stay in place.
 void DisableOfficeGlass();
 // Process exit only: takes the detours and vtable patches out.

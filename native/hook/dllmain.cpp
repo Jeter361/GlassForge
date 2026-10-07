@@ -913,6 +913,7 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID)
         g_module = module;
         DisableThreadLibraryCalls(module);
         Log(L"loaded");
+        if (IsProcessNamed(L"ms-teams.exe") && DxgiGlassRequested()) ClearOfficeBackdrop();
         if (IsOfficeProcess()) StartOfficeHooksEarly();
         if (DxgiGlassRequested()) StartDxgiGlassEarly();
         if (DxgiGlassRequested() && IsProcessNamed(L"ms-teams.exe"))
