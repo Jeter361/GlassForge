@@ -735,6 +735,28 @@ namespace
     // Teams with the DXGI glass: its WebView2 content is drawn by another process, so no swap chain of Teams' own ever
     // marks the TeamsWebView host for glass, and Teams paints a solid background under the content. Each host window
     // gets the host backdrop opt-in (Teams' brushes then render live) and the DXGI whole-window treatment.
+    // The new Outlook with the DXGI glass: the whole-window frame makes DWM draw its caption buttons over Outlook's
+    // own, as in Teams and Windows Terminal. Every "Outlook Host" window loses WS_SYSMENU, which hides DWM's set.
+    DWORD WINAPI OutlookCaptionWatch(void*)
+    {
+        for (;;)
+        {
+            EnumWindows([](HWND window, LPARAM) -> BOOL {
+                DWORD pid = 0;
+                GetWindowThreadProcessId(window, &pid);
+                wchar_t name[32]{};
+                if (pid == GetCurrentProcessId() && IsWindowVisible(window) && GetClassNameW(window, name, _countof(name))
+                    && _wcsicmp(name, L"Outlook Host") == 0 && (GetWindowLongPtrW(window, GWL_STYLE) & WS_SYSMENU))
+                {
+                    SetSysMenu(window, false);
+                    Log(L"outlook: host window %p shows only Outlook's caption buttons", window);
+                }
+                return TRUE;
+            }, 0);
+            Sleep(1000);
+        }
+    }
+
     DWORD WINAPI TeamsHostWatch(void*)
     {
         std::set<HWND> done;
@@ -929,6 +951,7 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID)
         {
             SetEnvironmentVariableW(L"GLASSFORGE_DXGI_TUNING", L"0.55 0");
             StartWebViewGlass();
+            if (HANDLE thread = CreateThread(nullptr, 0, OutlookCaptionWatch, nullptr, 0, nullptr)) CloseHandle(thread);
         }
         if (IsOfficeProcess()) StartOfficeHooksEarly();
         if (DxgiGlassRequested()) StartDxgiGlassEarly();
