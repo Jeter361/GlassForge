@@ -40,17 +40,19 @@ void Log(const wchar_t* format, ...)
     SYSTEMTIME time;
     GetLocalTime(&time);
 
-    AcquireSRWLockExclusive(&g_lock);
-    FILE* file = nullptr;
-    if (_wfopen_s(&file, LogPath(), L"a, ccs=UTF-8") == 0 && file)
-    {
-        fwprintf(file, L"%02d:%02d:%02d.%03d %s[%lu] %s\n", time.wHour, time.wMinute, time.wSecond, time.wMilliseconds,
-            name ? name + 1 : exe, GetCurrentProcessId(), message);
-        fclose(file);
-    }
-    ReleaseSRWLockExclusive(&g_lock);
-    // Sandboxed processes (a browser's GPU process) can't open the log file; the debug channel still gets the line.
+    // One append handle per process, opened on the first line ("loaded", from DllMain). A browser's GPU process locks
+    // itself down after startup and can't open files any more, but a handle it already holds keeps working.
+    static HANDLE file = INVALID_HANDLE_VALUE;
     wchar_t line[1200];
-    swprintf_s(line, L"GlassForge %s[%lu] %s\n", name ? name + 1 : exe, GetCurrentProcessId(), message);
-    OutputDebugStringW(line);
+    const int length = swprintf_s(line, L"%02d:%02d:%02d.%03d %s[%lu] %s\n", time.wHour, time.wMinute, time.wSecond,
+        time.wMilliseconds, name ? name + 1 : exe, GetCurrentProcessId(), message);
+    char utf8[3600];
+    const int bytes = length > 0 ? WideCharToMultiByte(CP_UTF8, 0, line, length, utf8, sizeof utf8, nullptr, nullptr) : 0;
+    AcquireSRWLockExclusive(&g_lock);
+    if (file == INVALID_HANDLE_VALUE)
+        file = CreateFileW(LogPath(), FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+            OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    DWORD written = 0;
+    if (file != INVALID_HANDLE_VALUE && bytes > 0) WriteFile(file, utf8, bytes, &written, nullptr);
+    ReleaseSRWLockExclusive(&g_lock);
 }
