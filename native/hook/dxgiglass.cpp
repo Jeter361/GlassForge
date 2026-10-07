@@ -621,6 +621,12 @@ float4 PS(float4 position : SV_Position) : SV_Target
             ReadKeepAreas(params);
             TrimKeepAreas(device.Get(), context.Get(), frame.Get(), chain, params);
         }
+        else if (tuning.gain == 0)
+        {
+            // The app draws real alpha (page-level glass): other layers (sticky headers, popups) pass theirs through
+            // too, without a second tint.
+            params.floor = 0;
+        }
         else
         {
             // Another layer we made premultiplied: keep all of it, fully opaque, as the app meant it.

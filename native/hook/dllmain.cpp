@@ -922,7 +922,13 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID)
             // The page leaves its own panels clear (teamsweb.cpp), so the GPU process passes Chromium's alpha through
             // (gain 0) with a dark tint at 45% for readability. Its WebView2 and GPU processes inherit this.
             SetEnvironmentVariableW(L"GLASSFORGE_DXGI_TUNING", L"0.45 0");
-            StartTeamsWebGlass();
+            StartWebViewGlass();
+        }
+        // The new Outlook: the same page-level glass, a little darker (asked for).
+        if (IsProcessNamed(L"olk.exe") && DxgiGlassRequested())
+        {
+            SetEnvironmentVariableW(L"GLASSFORGE_DXGI_TUNING", L"0.55 0");
+            StartWebViewGlass();
         }
         if (IsOfficeProcess()) StartOfficeHooksEarly();
         if (DxgiGlassRequested()) StartDxgiGlassEarly();

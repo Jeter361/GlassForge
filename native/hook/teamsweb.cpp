@@ -1,11 +1,12 @@
-// Teams with "Glass inside the app": instead of keying colors out of the finished frame (which can't tell a dark photo
-// pixel from a dark panel), the page itself leaves its big panels clear. The hook is in ms-teams.exe from launch, so it
-// catches CreateCoreWebView2EnvironmentWithOptions (WebView2Loader.dll) and every web view Teams then creates:
+// WebView2 apps with "Glass inside the app" (Teams, the new Outlook): instead of keying colors out of the finished frame (which can't tell a dark photo
+// pixel from a dark panel), the page itself leaves its big panels clear. The hook is in the app from launch, so it
+// catches CreateCoreWebView2EnvironmentWithOptions (WebView2Loader.dll) and every web view the app then creates:
 // - the controller's default background becomes transparent, so Chromium draws real alpha where nothing is painted;
 // - a script, run in every document, clears the background of large, square, dark, neutral panels and bars only
 //   (the app rail, the title and header bars, the chat list, the conversation). Text, borders, message bubbles, images and video are never touched.
 // The DXGI hook in the GPU process then passes that alpha through (GLASSFORGE_DXGI_TUNING gain 0, dxgiglass.cpp).
 #include <windows.h>
+#include <cstdio>
 #include <wrl.h>
 #include "WebView2.h"
 #include "detours.h"
@@ -33,8 +34,10 @@ namespace
       // Panels and bars only: a quarter of the width or a third of the height, and not tiny.
       if ((box.width < vw * 0.25 && box.height < vh * 0.35) || box.width * box.height < vw * vh * 0.01) continue;
       const style = getComputedStyle(el);
-      // Message bubbles, buttons, cards and the search box have rounded corners; panels and bars are square.
-      if (parseFloat(style.borderTopLeftRadius) > 2 || parseFloat(style.borderBottomRightRadius) > 2) continue;
+      // Message bubbles, buttons, cards and the search box have rounded corners; panels and bars are square, or rounded
+      // but large (Outlook's folder and reading panes) or nearly full-width (its ribbon).
+      const rounded = parseFloat(style.borderTopLeftRadius) > 2 || parseFloat(style.borderBottomRightRadius) > 2;
+      if (rounded && box.width * box.height < vw * vh * 0.06 && box.width < vw * 0.6) continue;
       if (style.backgroundImage !== 'none') continue;
       const m = style.backgroundColor.match(/rgba?\(([^)]+)\)/);
       if (!m) continue;
@@ -95,7 +98,7 @@ namespace
             script = webView->AddScriptToExecuteOnDocumentCreated(PanelScript, nullptr);
             webView->ExecuteScript(PanelScript, nullptr); // a document that already exists
         }
-        Log(L"teams web: controller %p, transparent background %08X, panel script %08X", controller, background, script);
+        Log(L"web glass: controller %p, transparent background %08X, panel script %08X", controller, background, script);
     }
 
     ComPtr<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler> Wrap(ICoreWebView2CreateCoreWebView2ControllerCompletedHandler* inner)
@@ -164,7 +167,7 @@ namespace
             Real_CreateControllerBase = reinterpret_cast<CreateControllerFn>(baseTable[3]);
             PatchSlot(&baseTable[3], reinterpret_cast<void*>(&Hook_CreateControllerBase));
         }
-        Log(L"teams web: environment %p watched (%s)", environment, hasLatest ? L"all controller kinds" : L"plain controllers only");
+        Log(L"web glass: environment %p watched (%s)", environment, hasLatest ? L"all controller kinds" : L"plain controllers only");
     }
 
     HRESULT STDAPICALLTYPE Hook_CreateEnvironment(PCWSTR browserFolder, PCWSTR userDataFolder, ICoreWebView2EnvironmentOptions* options,
@@ -176,7 +179,25 @@ namespace
                 if (SUCCEEDED(result)) PatchEnvironment(environment);
                 return keep ? keep->Invoke(result, environment) : S_OK;
             });
-        Log(L"teams web: environment requested");
+        // Diagnostics only: %LOCALAPPDATA%\GlassForge\webdebug.txt opens DevTools on 127.0.0.1:<port in the file>.
+        wchar_t marker[MAX_PATH]{};
+        if (options && GetEnvironmentVariableW(L"LOCALAPPDATA", marker, MAX_PATH))
+        {
+            wcscat_s(marker, L"\\GlassForge\\webdebug.txt");
+            if (FILE* file = nullptr; _wfopen_s(&file, marker, L"r") == 0 && file)
+            {
+                int port = 0;
+                fwscanf_s(file, L"%d", &port);
+                fclose(file);
+                LPWSTR current = nullptr;
+                options->get_AdditionalBrowserArguments(&current);
+                wchar_t arguments[4096]{};
+                swprintf_s(arguments, L"%s --remote-debugging-port=%d --remote-debugging-address=127.0.0.1", current ? current : L"", port > 0 ? port : 9333);
+                if (current) CoTaskMemFree(current);
+                Log(L"web glass: DevTools on port %d (%08X)", port > 0 ? port : 9333, options->put_AdditionalBrowserArguments(arguments));
+            }
+        }
+        Log(L"web glass: environment requested");
         return Real_CreateEnvironment(browserFolder, userDataFolder, options, wrapped.Get());
     }
 }
@@ -200,44 +221,35 @@ namespace
                 DetourAttach(reinterpret_cast<PVOID*>(&Real_CreateEnvironment), reinterpret_cast<PVOID>(&Hook_CreateEnvironment));
                 const LONG result = DetourTransactionCommit();
                 g_loaderHooked = result == NO_ERROR;
-                Log(L"teams web: loader %p, environment detour %ld", loader, result);
+                Log(L"web glass: loader %p, environment detour %ld", loader, result);
             }
         }
         ReleaseSRWLockExclusive(&g_loaderLock);
     }
 
-    bool IsLoader(HMODULE module)
-    {
-        wchar_t path[MAX_PATH]{};
-        if (!module || !GetModuleFileNameW(module, path, MAX_PATH)) return false;
-        const wchar_t* name = wcsrchr(path, L'\\');
-        return _wcsicmp(name ? name + 1 : path, L"WebView2Loader.dll") == 0;
-    }
 
-    // Teams loads WebView2Loader.dll on demand (delay load), after the hook arrives: watch library loads until it does.
-    decltype(&LoadLibraryExW) Real_LoadLibraryExW = LoadLibraryExW;
-    decltype(&LoadLibraryExA) Real_LoadLibraryExA = LoadLibraryExA;
-    HMODULE WINAPI Hook_LoadLibraryExW(LPCWSTR name, HANDLE file, DWORD flags)
+    // The app loads WebView2Loader.dll after the hook arrives: on demand (Teams' delay load) or as a dependency of
+    // another library (the new Outlook). Every load goes through ntdll's LdrLoadDll, so once one returns with the
+    // loader in the process, it is hooked before the app can call it.
+    using LdrLoadDllFn = LONG(NTAPI*)(PWSTR, PULONG, void*, PVOID*);
+    LdrLoadDllFn Real_LdrLoadDll = nullptr;
+    LONG NTAPI Hook_LdrLoadDll(PWSTR path, PULONG flags, void* name, PVOID* handle)
     {
-        const HMODULE module = Real_LoadLibraryExW(name, file, flags);
-        if (!g_loaderHooked && IsLoader(module)) HookLoader(module);
-        return module;
-    }
-    HMODULE WINAPI Hook_LoadLibraryExA(LPCSTR name, HANDLE file, DWORD flags)
-    {
-        const HMODULE module = Real_LoadLibraryExA(name, file, flags);
-        if (!g_loaderHooked && IsLoader(module)) HookLoader(module);
-        return module;
+        const LONG status = Real_LdrLoadDll(path, flags, name, handle);
+        if (!g_loaderHooked)
+            if (HMODULE loader = GetModuleHandleW(L"WebView2Loader.dll")) HookLoader(loader);
+        return status;
     }
 }
 
-void StartTeamsWebGlass()
+void StartWebViewGlass()
 {
-    // Called from DllMain. Already mapped (a static import): hook it now; otherwise when Teams loads it.
+    // Called from DllMain. Already mapped (a static import): hook it now; otherwise when the app loads it.
     if (HMODULE loader = GetModuleHandleW(L"WebView2Loader.dll")) { HookLoader(loader); return; }
+    Real_LdrLoadDll = reinterpret_cast<LdrLoadDllFn>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "LdrLoadDll"));
+    if (!Real_LdrLoadDll) return;
     DetourTransactionBegin();
     DetourUpdateThread(GetCurrentThread());
-    DetourAttach(reinterpret_cast<PVOID*>(&Real_LoadLibraryExW), reinterpret_cast<PVOID>(&Hook_LoadLibraryExW));
-    DetourAttach(reinterpret_cast<PVOID*>(&Real_LoadLibraryExA), reinterpret_cast<PVOID>(&Hook_LoadLibraryExA));
-    Log(L"teams web: waiting for WebView2Loader.dll (%ld)", DetourTransactionCommit());
+    DetourAttach(reinterpret_cast<PVOID*>(&Real_LdrLoadDll), reinterpret_cast<PVOID>(&Hook_LdrLoadDll));
+    Log(L"web glass: waiting for WebView2Loader.dll (%ld)", DetourTransactionCommit());
 }

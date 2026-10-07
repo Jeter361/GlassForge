@@ -1,5 +1,5 @@
 #pragma once
 
-// Teams with "Glass inside the app": from DllMain in ms-teams.exe. Every web view Teams creates gets a transparent
-// default background and a script that leaves its big dark panels clear; see teamsweb.cpp.
-void StartTeamsWebGlass();
+// WebView2 apps with "Glass inside the app" (Teams, the new Outlook): from DllMain. Every web view the app creates
+// gets a transparent default background and a script that leaves its big dark panels clear; see teamsweb.cpp.
+void StartWebViewGlass();
