@@ -1,4 +1,4 @@
-﻿// GlassForge.Hook: loaded into one target app through a thread-scoped SetWindowsHookEx, so only the windows
+// GlassForge.Hook: loaded into one target app through a thread-scoped SetWindowsHookEx, so only the windows
 // GlassForge was asked to style are affected.
 //
 // How the glass works: the hooked window gets an Acrylic system backdrop with its frame extended over the whole
@@ -23,6 +23,7 @@
 #include "xaml.h"
 #include "uwp.h"
 #include "office.h"
+#include "teamsweb.h"
 #include "dxgiglass.h"
 
 namespace
@@ -913,7 +914,14 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID)
         g_module = module;
         DisableThreadLibraryCalls(module);
         Log(L"loaded");
-        if (IsProcessNamed(L"ms-teams.exe") && DxgiGlassRequested()) ClearOfficeBackdrop();
+        if (IsProcessNamed(L"ms-teams.exe") && DxgiGlassRequested())
+        {
+            ClearOfficeBackdrop();
+            // The page leaves its own panels clear (teamsweb.cpp), so the GPU process passes Chromium's alpha through
+            // (gain 0) with a dark tint at 45% for readability. Its WebView2 and GPU processes inherit this.
+            SetEnvironmentVariableW(L"GLASSFORGE_DXGI_TUNING", L"0.45 0");
+            StartTeamsWebGlass();
+        }
         if (IsOfficeProcess()) StartOfficeHooksEarly();
         if (DxgiGlassRequested()) StartDxgiGlassEarly();
         if (DxgiGlassRequested() && IsProcessNamed(L"ms-teams.exe"))

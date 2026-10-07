@@ -72,12 +72,31 @@ namespace
 
     // How much of the background stays: 0 = fully clear, 1 = untouched. A little keeps text readable on busy wallpaper.
     constexpr float BackgroundFloor = 0.12f;
+    // Per-app tuning handed down from the app's own process (GPU processes can't tell whose they are): the environment
+    // variable GLASSFORGE_DXGI_TUNING = "<floor> <gain>". Gain > 1 makes anything clearly unlike the background solid
+    // sooner, so text and pictures on a near-black background stay crisp instead of going half see-through.
+    struct Tuning { float floor = BackgroundFloor; float gain = 1; };
+    const Tuning& CurrentTuning()
+    {
+        static const Tuning tuning = [] {
+            Tuning t;
+            wchar_t text[64]{};
+            if (GetEnvironmentVariableW(L"GLASSFORGE_DXGI_TUNING", text, _countof(text)))
+            {
+                float floor = 0, gain = 0;
+                if (swscanf_s(text, L"%f %f", &floor, &gain) == 2 && floor >= 0 && floor <= 1 && (gain == 0 || (gain >= 1 && gain <= 20)))
+                    t = { floor, gain };
+            }
+            return t;
+        }();
+        return tuning;
+    }
     // When to look for the background color: a few times early (apps show a splash screen in a different color first),
     // then every 600 frames in case the app switches theme.
     bool DetectNow(unsigned frame) { return frame == 0 || frame == 30 || frame == 120 || frame == 300 || frame % 1800 == 0; }
 
     constexpr char ShaderSource[] = R"(
-cbuffer Params : register(b0) { float3 Background; float Floor; uint KeepCount; uint ClearCount; uint2 Padding; int4 Keep[8]; int4 Clear[8]; float4 Background2; };
+cbuffer Params : register(b0) { float3 Background; float Floor; uint KeepCount; uint ClearCount; float Gain; uint Padding; int4 Keep[8]; int4 Clear[8]; float4 Background2; };
 Texture2D<float4> Frame : register(t0);
 float4 VS(uint id : SV_VertexID) : SV_Position
 {
@@ -86,6 +105,12 @@ float4 VS(uint id : SV_VertexID) : SV_Position
 }
 float4 PS(float4 position : SV_Position) : SV_Target
 {
+    // Gain 0: the app draws real (premultiplied) alpha itself, only where it means to; add the dark tint underneath.
+    if (Gain == 0)
+    {
+        float4 s = Frame.Load(int3(position.xy, 0));
+        return s + (1 - s.a) * float4(0, 0, 0, Floor);
+    }
     float3 c = Frame.Load(int3(position.xy, 0)).rgb;
     // Areas left exactly as the app drew them (a remote desktop view, a video), fully solid.
     for (uint i = 0; i < KeepCount; ++i)
@@ -116,7 +141,14 @@ float4 PS(float4 position : SV_Position) : SV_Target
     // was subtle on the solid background, and at full strength it turns into a hard black line over bright glass.
     float3 down = 0.5 * (b - c) / max(b, 1e-4);
     float3 need = max(max(up, down), 0);
-    float alpha = saturate(max(max(need.r, need.g), max(need.b, Floor)));
+    float alpha = max(saturate(max(max(need.r, need.g), need.b) * Gain), Floor);
+    // Tuned apps (Gain > 1, a near-black background): only colorless greys no lighter than the background are glass, so
+    // every darker flat panel goes too; anything else, photos included, is solid unless it is almost the background.
+    if (Gain > 1)
+    {
+        float spread = max(max(c.r, c.g), c.b) - min(min(c.r, c.g), c.b);
+        if (spread < 0.025 && all(c <= b + 0.02)) alpha = Floor;
+    }
     // Premultiplied foreground: the pixel minus the background's remaining share.
     float3 rgb = clamp(c - (1 - alpha) * b, 0, alpha);
     return float4(rgb, alpha);
@@ -138,7 +170,8 @@ float4 PS(float4 position : SV_Position) : SV_Target
         float floor;
         UINT32 keepCount;
         UINT32 clearCount;
-        UINT32 padding[2];
+        float gain;
+        UINT32 padding;
         INT32 keep[8][4];
         INT32 clear[8][4];
         float background2[4]; // rgb, a = 1 when present
@@ -572,7 +605,9 @@ float4 PS(float4 position : SV_Position) : SV_Target
         ComPtr<ID3D11RenderTargetView> target;
         if (FAILED(device->CreateRenderTargetView(frame.Get(), nullptr, &target))) { chain.unsupported = true; ReleaseSRWLockExclusive(&g_lock); return; }
         context->CopyResource(chain.copy.Get(), frame.Get());
-        Params params{ { chain.background[0], chain.background[1], chain.background[2] }, BackgroundFloor };
+        const Tuning& tuning = CurrentTuning();
+        Params params{ { chain.background[0], chain.background[1], chain.background[2] }, tuning.floor };
+        params.gain = tuning.gain;
         if (chain.haveBackground2)
         {
             for (int i = 0; i < 3; ++i) params.background2[i] = chain.background2[i];

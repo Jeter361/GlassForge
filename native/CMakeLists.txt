@@ -1,4 +1,4 @@
-﻿cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.20)
 project(GlassForgeNative LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -25,9 +25,12 @@ add_library(GlassForge.Hook SHARED
     hook/uwp.cpp
     hook/office.cpp
     hook/dxgiglass.cpp
+    hook/teamsweb.cpp
     hook/exports.def
     hook/log.cpp)
 target_link_libraries(GlassForge.Hook PRIVATE detours user32 gdi32 dwmapi uxtheme comctl32 d2d1 runtimeobject CoreMessaging d3d11 dxgi d3dcompiler dcomp advapi32 shlwapi ole32 oleaut32 uuid)
+# WebView2.h only (BSD, from the Microsoft.Web.WebView2 NuGet package): Teams' web views are reached through it.
+target_include_directories(GlassForge.Hook PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/WebView2/include)
 target_compile_definitions(GlassForge.Hook PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_compile_options(GlassForge.Hook PRIVATE /W4 /permissive-)
 
