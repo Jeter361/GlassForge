@@ -54,5 +54,24 @@ void Log(const wchar_t* format, ...)
             OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     DWORD written = 0;
     if (file != INVALID_HANDLE_VALUE && bytes > 0) WriteFile(file, utf8, bytes, &written, nullptr);
+    else if (bytes > 0)
+    {
+        // Sandboxed from the start (a Chromium GPU process): no file, but a section a listener created can be opened
+        // (as the keep-solid areas are). Layout: LONG used, then the text. Only there while someone is listening.
+        static char* shared = nullptr;
+        static bool tried = false;
+        if (!tried)
+        {
+            tried = true;
+            if (HANDLE section = OpenFileMappingW(FILE_MAP_WRITE, FALSE, L"Local\\GlassForge.HookLog"))
+                shared = static_cast<char*>(MapViewOfFile(section, FILE_MAP_WRITE, 0, 0, 0));
+        }
+        constexpr LONG capacity = 4 * 1024 * 1024;
+        if (shared)
+        {
+            const LONG at = InterlockedExchangeAdd(reinterpret_cast<volatile LONG*>(shared), bytes);
+            if (at + bytes <= capacity) memcpy(shared + sizeof(LONG) + at, utf8, bytes);
+        }
+    }
     ReleaseSRWLockExclusive(&g_lock);
 }

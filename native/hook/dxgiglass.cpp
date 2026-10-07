@@ -75,7 +75,9 @@ namespace
     // Per-app tuning handed down from the app's own process (GPU processes can't tell whose they are): the environment
     // variable GLASSFORGE_DXGI_TUNING = "<floor> <gain>". Gain > 1 makes anything clearly unlike the background solid
     // sooner, so text and pictures on a near-black background stay crisp instead of going half see-through.
-    struct Tuning { float floor = BackgroundFloor; float gain = 1; };
+    // An optional third value 1 gives every layer the glass, each keyed on its own background (Claude desktop draws its
+    // interface on a layer above a black base the same size, so "the largest layer" picked the base).
+    struct Tuning { float floor = BackgroundFloor; float gain = 1; bool allLayers = false; };
     const Tuning& CurrentTuning()
     {
         static const Tuning tuning = [] {
@@ -84,8 +86,9 @@ namespace
             if (GetEnvironmentVariableW(L"GLASSFORGE_DXGI_TUNING", text, _countof(text)))
             {
                 float floor = 0, gain = 0;
-                if (swscanf_s(text, L"%f %f", &floor, &gain) == 2 && floor >= 0 && floor <= 1 && (gain == 0 || (gain >= 1 && gain <= 20)))
-                    t = { floor, gain };
+                int all = 0;
+                if (swscanf_s(text, L"%f %f %d", &floor, &gain, &all) >= 2 && floor >= 0 && floor <= 1 && (gain == 0 || (gain >= 1 && gain <= 20)))
+                    t = { floor, gain, all == 1 };
             }
             return t;
         }();
@@ -227,6 +230,8 @@ float4 PS(float4 position : SV_Position) : SV_Target
         bool unsupported = false;
         UINT64 area = 0;          // frame size, to tell the root layer from the others
         ULONGLONG lastSeen = 0;
+        ULONGLONG firstSeen = 0;  // for detection by time: some apps (Claude) present only when something changes,
+        ULONGLONG lastDetect = 0; // so frame counts never reach the later checks and the splash color stuck
         ComPtr<ID3D11Texture2D> detectStaging;
         bool detectPending = false;
         // Letterbox trimming of the keep-solid areas: a video shown "contained" (LogMeIn's remote screen) has black
@@ -583,7 +588,7 @@ float4 PS(float4 position : SV_Position) : SV_Target
         chain.lastSeen = now;
         const bool forced = g_forcedOpaque.count(swapChain) != 0;
         bool root = true;
-        if (forced)
+        if (forced && !CurrentTuning().allLayers)
         {
             const auto current = g_root ? g_chains.find(g_root) : g_chains.end();
             const bool rootAlive = current != g_chains.end() && now - current->second.lastSeen < 2000;
@@ -593,7 +598,12 @@ float4 PS(float4 position : SV_Position) : SV_Target
         // Multi-layer apps keep the background they settled on: a message full of white or another panel must not
         // switch which color turns to glass (the first checks still catch the splash screen giving way).
         const bool settled = forced && chain.haveBackground && chain.frames > 300;
-        if (root && !settled) DetectBackground(device.Get(), context.Get(), frame.Get(), chain, DetectNow(chain.frames));
+        if (!chain.firstSeen) chain.firstSeen = now;
+        // By frame count, or by time: every half second for the first 15 seconds, then every 5 seconds.
+        const bool detectNow = DetectNow(chain.frames)
+            || now - chain.lastDetect >= (now - chain.firstSeen < 15000 ? 500u : 5000u);
+        if (root && !settled && detectNow) chain.lastDetect = now;
+        if (root && !settled) DetectBackground(device.Get(), context.Get(), frame.Get(), chain, detectNow);
         chain.frames++;
         const bool glass = root && chain.haveBackground;
         if (!glass && !forced) { ReleaseSRWLockExclusive(&g_lock); return; }

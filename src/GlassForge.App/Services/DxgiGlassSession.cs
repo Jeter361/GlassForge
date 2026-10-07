@@ -123,8 +123,10 @@ internal sealed class DxgiGlassSession(AppProfile profile) : IGlassSession
         if (withGlass && dll is null) { Log("the hook DLL isn't available in this build"); return; }
         if (withGlass && package is not null && !package.SetGlassAtLaunch(dll)) return;
 
-        // Electron and similar apps hide to the tray on close and leave helper processes; all of them go.
+        // Electron and similar apps hide to the tray on close and leave helper processes; all of them go. Only the app's
+        // own: another program can share the name (Claude desktop's Claude.exe and the Claude Code CLI's claude.exe).
         var name = process.ProcessName;
+        var folder = exe is null ? null : Path.GetDirectoryName(exe);
         process.CloseMainWindow();
         if (!process.WaitForExit(5000))
         {
@@ -133,6 +135,15 @@ internal sealed class DxgiGlassSession(AppProfile profile) : IGlassSession
         }
         foreach (var leftover in Process.GetProcessesByName(name))
         {
+            string? leftoverExe = null;
+            try { leftoverExe = leftover.MainModule?.FileName; }
+            catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+            if (folder is null || leftoverExe is null
+                || !string.Equals(Path.GetDirectoryName(leftoverExe), folder, StringComparison.OrdinalIgnoreCase))
+            {
+                leftover.Dispose();
+                continue;
+            }
             try { leftover.Kill(); }
             catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception) { }
             leftover.Dispose();

@@ -950,6 +950,10 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID)
         // see-through, so pictures stay solid. Its GPU process inherits this.
         if ((IsProcessNamed(L"ChatGPT Classic.exe") || IsProcessNamed(L"ChatGPT.exe")) && DxgiGlassRequested())
             SetEnvironmentVariableW(L"GLASSFORGE_DXGI_TUNING", L"0.50 6");
+        // Claude desktop (Electron, color-keyed) gets the same, on every layer: its interface sits on a layer above a
+        // black base. Only its packaged Claude.exe ever has the hook (the Claude Code CLI is claude.exe too).
+        if (IsProcessNamed(L"Claude.exe") && DxgiGlassRequested())
+            SetEnvironmentVariableW(L"GLASSFORGE_DXGI_TUNING", L"0.50 6 1");
         // The new Outlook: the same page-level glass, a little darker (asked for).
         if (IsProcessNamed(L"olk.exe") && DxgiGlassRequested())
         {
