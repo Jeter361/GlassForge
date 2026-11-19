@@ -4,7 +4,12 @@ GlassForge is a Windows desktop tool that applies a configurable frosted-glass b
 
 The current foundation is based on working Teams, Outlook, and Word PowerShell prototypes, but the product code is native C#.
 
-> **Public beta — contributors and testers wanted.** GlassForge works day to day, but it needs broader coverage across apps, Windows builds, GPUs, and multi-monitor/DPI setups. See [Get involved](#get-involved).
+> [!IMPORTANT]
+> **GlassForge is archived (November 2026) and no longer developed. Work is moving to [Windhawk](https://windhawk.net) mods for true native transparency.**
+>
+> GlassForge's main approach puts a glass window *behind* each app and makes the app see-through over it. That works almost anywhere, but it always looks dull next to the glass Windows draws itself. Native transparency (the app's own window showing Windows' live blur, the way Windows Settings can) looks far better, but each app needs its own fix from inside the app. GlassForge already got there for Windows Settings, Notepad, File Explorer and the Office apps, and Windhawk is the better home for that work: it loads each fix into its app, provides the hooks and the settings, and turns mods on and off cleanly.
+>
+> The last release below still works but won't be updated. Everything learned along the way (what works for each app, what failed and why) is in [`docs/GLASS_WRITEUP.md`](https://github.com/Jeter361/GlassForge/blob/feat/minimal-ui/docs/GLASS_WRITEUP.md) on the `feat/minimal-ui` branch.
 
 ![GlassForge applying frosted glass to Chrome](docs/Images/glassforge-demo.gif)
 
