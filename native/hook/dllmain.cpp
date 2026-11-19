@@ -25,6 +25,7 @@
 #include "office.h"
 #include "teamsweb.h"
 #include "dxgiglass.h"
+#include "hostglass.h"
 
 namespace
 {
@@ -667,6 +668,12 @@ namespace
             if (t_removedSysMenu) SetSysMenu(root, false);
             return;
         }
+        // Experimental live glass under Explorer's content (hostglass.cpp), only while its config file exists.
+        if (!t_xamlOnly && ApplyExplorerHostGlass(root))
+        {
+            constexpr int none = 1; // DWMSBT_NONE
+            Real_DwmSetWindowAttribute(root, DWMWA_SYSTEMBACKDROP_TYPE, &none, sizeof none);
+        }
         XamlStyle style;
         style.app = t_xamlOnly ? XamlApp::Settings : XamlApp::Explorer;
         style.logAll = g_survey;
@@ -684,6 +691,7 @@ namespace
         if (root)
         {
             if (!t_frameOnly) RemoveXamlThread();
+            if (!t_frameOnly && !t_xamlOnly) RemoveExplorerHostGlass(root);
             AcquireSRWLockExclusive(&g_rootLock);
             const auto entry = g_roots.find(root);
             int original = entry != g_roots.end() ? entry->second : 0;

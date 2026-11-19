@@ -26,6 +26,7 @@ add_library(GlassForge.Hook SHARED
     hook/office.cpp
     hook/dxgiglass.cpp
     hook/teamsweb.cpp
+    hook/hostglass.cpp
     hook/exports.def
     hook/log.cpp)
 target_link_libraries(GlassForge.Hook PRIVATE detours user32 gdi32 dwmapi uxtheme comctl32 d2d1 runtimeobject CoreMessaging d3d11 dxgi d3dcompiler dcomp advapi32 shlwapi ole32 oleaut32 uuid)

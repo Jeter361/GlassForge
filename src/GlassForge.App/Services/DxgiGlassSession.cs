@@ -59,9 +59,11 @@ internal sealed class DxgiGlassSession(AppProfile profile) : IGlassSession
                 {
                     lastCheck = DateTime.Now;
                     var target = MainProcess(_profile.ProcessName);
-                    if (target is not null && !HasHook(target))
+                    if (target is not null && !HasHook(target, currentOnly: true))
                     {
-                        Log($"{_profile.ProcessName} is running without the hook; restarting it with glass");
+                        // Also an older build's hook: a Store app's package keeps launching with the DLL path it was
+                        // registered with, so a rebuilt hook never reached it until it was registered again.
+                        Log($"{_profile.ProcessName} is running without this build's hook; restarting it with glass");
                         Relaunch(target, withGlass: true);
                         target.Dispose();
                         target = null;
@@ -101,12 +103,18 @@ internal sealed class DxgiGlassSession(AppProfile profile) : IGlassSession
         return null;
     }
 
-    private static bool HasHook(Process process)
+    private static readonly Lazy<string?> CurrentHookName = new(() => HookLibrary.Extract() is { } dll ? Path.GetFileName(dll) : null);
+
+    private static bool HasHook(Process process, bool currentOnly = false)
     {
+        var current = currentOnly ? CurrentHookName.Value : null;
         try
         {
             foreach (ProcessModule module in process.Modules)
-                if (module.ModuleName.StartsWith("GlassForge.Hook", StringComparison.OrdinalIgnoreCase)) return true;
+                if (current is not null
+                    ? string.Equals(module.ModuleName, current, StringComparison.OrdinalIgnoreCase)
+                    : module.ModuleName.StartsWith("GlassForge.Hook", StringComparison.OrdinalIgnoreCase))
+                    return true;
         }
         catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or InvalidOperationException) { }
         return false;

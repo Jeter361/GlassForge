@@ -666,6 +666,39 @@ only in the **system** `Windows.UI.Composition`. Explorer's XAML is WinUI 3 (`Mi
 cannot be injected into Explorer's XAML island. So the untinted, animated-wallpaper look Settings has is **not
 reachable for Explorer** with the APIs Windows exposes; this is an API limitation, not an approach problem.
 
+**Nov 4, 2026: "match Teams' darker glass" (a dark tint over Explorer), also ruled out:**
+
+| Attempt | Result |
+| --- | --- |
+| Dark tint on the XAML bars only (`xaml.cpp` brush #73181818 instead of Transparent) | Not built: the file list and navigation pane are GDI, made clear by painting black. GDI can't draw a translucent dark color (anything but black only adds light), so only the bars would darken: two-toned |
+| `SetWindowCompositionAttribute` accent acrylic (state 4) with a visible dark tint, from outside, on `CabinetWClass` | Accepted (returns 1) but the window went **solid black**, as with the transparent tint. Resetting the accent, re-setting the backdrop type and `SWP_FRAMECHANGED` did **not** bring the glass back; only closing the window did |
+| DWM Mica Alt (`DWMWA_SYSTEMBACKDROP_TYPE` 4) | Renders, but nearly black and opaque, no wallpaper showing: not Teams' look |
+
+**Then tried (`native/hook/hostglass.cpp`, off unless `%LOCALAPPDATA%\GlassForge\explorer-hostglass.txt` exists):**
+`DWMWA_USE_HOSTBACKDROPBRUSH` set in-process, and on a thread of its own (own DispatcherQueue and system compositor) a
+`CreateDesktopWindowTarget(root, isTopmost = FALSE)` tree: a host backdrop sprite with a tint sprite over it.
+
+- It **renders**, and the host backdrop is **live** (Wallpaper Engine animates behind it): the earlier "occluded"
+  result was not reproduced. A 50% red test layer covered the whole window.
+- But its z-order is: the window's **GDI content** (the classic `DirectUIHWND` file list and `SysTreeView32`
+  navigation pane, drawn into the top-level window's redirection surface) **< our target < the XAML islands**
+  (`DesktopChildSiteBridge`: the title/command bars, and the Home/Gallery pages' folder view). So the host backdrop,
+  opaque, **hid the classic file list and navigation pane completely**; only the bars and the Home page showed. A
+  tint alone (`nohost`) left them visible but dimmed under the tint (yellow folder icons turned brown).
+- Making the GDI content its own surface (`WS_EX_LAYERED` + `LWA_COLORKEY` black on `DUIViewWndClassName`) lifted
+  it above the target. A screen capture showed it grey with fringed text, but **by eye it looked right** (the user;
+  captures misrepresent this, trust the eye). Built into `hostglass.cpp` (lifted on `EVENT_OBJECT_CREATE/SHOW`, a
+  cut-out where DWM draws the caption buttons, which also sit below the target). **Dead end: input.** The lifted
+  window is wholly click-through: `WindowFromPoint` anywhere over it, file names included, returns the
+  `ShellTabWindowClass` behind. Forwarding mouse and pointer messages from that window to the deepest child reaches
+  the file list (`WM_MOUSEWHEEL` arrives) but it ignores them (it hit-tests for itself), so scrolling and clicking
+  files broke. Turned off; the lift and forwarding code stay in `hostglass.cpp` behind the config file.
+
+So live glass under Explorer needs the classic content above the target with real per-pixel alpha. Ideas not tried:
+`UpdateLayeredWindow` with the hook's coverage-alpha rendering for those child windows, or putting the host backdrop
+into the XAML islands' trees instead (not possible from `Microsoft.UI.Composition`, see above). The XAML-only pages
+(Home, Gallery) would already work as they are.
+
 Method notes for a future attempt: the Windows App SDK winmds live in the runtime package
 (`Microsoft.WindowsAppRuntime.1.5_...\Microsoft.UI.Xaml.winmd` and `Microsoft.UI.winmd`); C++/WinRT projections can be
 generated from them with `cppwinrt.exe` (input the runtime winmds plus `UnionMetadata\Windows.winmd` so the

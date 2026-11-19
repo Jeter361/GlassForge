@@ -18,6 +18,7 @@
 #include <dwmapi.h>
 #include <shlwapi.h>
 #include <cstdlib>
+#include <cstring>
 #include <algorithm>
 #include <vector>
 #include <set>
@@ -245,6 +246,13 @@ float4 PS(float4 position : SV_Position) : SV_Target
         UINT32 pendingCount = 0;
         bool trimPending = false;
         unsigned trimAge = 0;
+        // `copy` doubles as the app's own, untouched frame: partial presents update only their dirty rectangles in it,
+        // so the whole frame can be redrawn from it every time. Without that, anything processed with other settings
+        // (another layer briefly taken for the root, a tint change) stayed on screen until the mouse passed over it.
+        bool sourceValid = false;   // copy holds only the app's own pixels, all of them current
+        bool processedLast = false; // the last present of this chain went through the shader
+        bool haveLastParams = false;
+        Params lastParams{};
     };
 
     std::map<ID3D11Device*, DeviceResources> g_devices;
@@ -520,18 +528,21 @@ float4 PS(float4 position : SV_Position) : SV_Target
     }
 
     // A partial present (Present1 with dirty rectangles: Chromium/WebView2 redrawing only what changed under the
-    // mouse) leaves the rest of the back buffer as last presented, which is already glass. Processing it again would
-    // key it twice and erode it a bit more each time, so only the dirty rectangles are processed.
-    void Process(IDXGISwapChain* swapChain, UINT flags, const DXGI_PRESENT_PARAMETERS* partial = nullptr)
+    // mouse) leaves the rest of the back buffer as last presented, which is already glass. Processing that again would
+    // key it twice and erode it, so the app's own pixels are kept in `copy` (dirty rectangles updated) and the whole
+    // frame is redrawn from there. Returns true when the present must cover the whole frame: the settings changed
+    // since the last one, so pixels outside the dirty rectangles changed too.
+    bool Process(IDXGISwapChain* swapChain, UINT flags, const DXGI_PRESENT_PARAMETERS* partial = nullptr)
     {
-        if (flags & DXGI_PRESENT_TEST) return;
+        if (flags & DXGI_PRESENT_TEST) return false;
         AcquireSRWLockExclusive(&g_lock);
         auto& chain = g_chains[swapChain];
-        if (chain.unsupported) { ReleaseSRWLockExclusive(&g_lock); return; }
+        if (chain.unsupported) { ReleaseSRWLockExclusive(&g_lock); return false; }
         if (const auto window = g_chainWindows.find(swapChain); window != g_chainWindows.end() && IsFullscreen(window->second))
         {
+            chain.processedLast = false;
             ReleaseSRWLockExclusive(&g_lock);
-            return;
+            return false;
         }
         ComPtr<ID3D11Device> device;
         ComPtr<ID3D11Texture2D> frame;
@@ -553,13 +564,13 @@ float4 PS(float4 position : SV_Position) : SV_Target
             Log(L"dxgi: swap chain %p unsupported (not D3D11, not 8-bit UNORM, or multisampled); left alone", swapChain);
             chain.unsupported = true;
             ReleaseSRWLockExclusive(&g_lock);
-            return;
+            return false;
         }
         auto& resources = ResourcesFor(device.Get());
         ComPtr<ID3D11DeviceContext> context;
         device->GetImmediateContext(&context);
         ComPtr<ID3D11DeviceContext1> context1;
-        if (!resources.ok || FAILED(context.As(&context1))) { ReleaseSRWLockExclusive(&g_lock); return; }
+        if (!resources.ok || FAILED(context.As(&context1))) { chain.processedLast = false; ReleaseSRWLockExclusive(&g_lock); return false; }
 
         D3D11_TEXTURE2D_DESC frameDesc{};
         frame->GetDesc(&frameDesc);
@@ -576,11 +587,12 @@ float4 PS(float4 position : SV_Position) : SV_Target
             {
                 chain.unsupported = true;
                 ReleaseSRWLockExclusive(&g_lock);
-                return;
+                return false;
             }
             chain.width = frameDesc.Width;
             chain.height = frameDesc.Height;
             chain.format = frameDesc.Format;
+            chain.sourceValid = false;
         }
         // The root layer is the largest one presented lately; only it gets the glass.
         const ULONGLONG now = GetTickCount64();
@@ -590,9 +602,18 @@ float4 PS(float4 position : SV_Position) : SV_Target
         bool root = true;
         if (forced && !CurrentTuning().allLayers)
         {
+            // Chromium presents only when something changes, so a root that has been quiet for a while is still the
+            // root: a tooltip, menu or small popup presenting meanwhile must not take the glass (the page then lost its
+            // tint until each part of it was redrawn). A quiet root gives way only to a layer of similar size (the page
+            // made again after a resize) or, after a minute, to anything.
             const auto current = g_root ? g_chains.find(g_root) : g_chains.end();
-            const bool rootAlive = current != g_chains.end() && now - current->second.lastSeen < 2000;
-            if (!rootAlive || (swapChain != g_root && chain.area * 2 > current->second.area * 3)) g_root = swapChain;
+            if (current == g_chains.end()) g_root = swapChain;
+            else if (swapChain != g_root)
+            {
+                const ULONGLONG quiet = now - current->second.lastSeen;
+                const UINT64 rootArea = current->second.area;
+                if (chain.area * 2 > rootArea * 3 || (quiet >= 2000 && chain.area * 4 >= rootArea * 3) || quiet >= 60000) g_root = swapChain;
+            }
             root = swapChain == g_root;
         }
         // Multi-layer apps keep the background they settled on: a message full of white or another panel must not
@@ -606,11 +627,33 @@ float4 PS(float4 position : SV_Position) : SV_Target
         if (root && !settled) DetectBackground(device.Get(), context.Get(), frame.Get(), chain, detectNow);
         chain.frames++;
         const bool glass = root && chain.haveBackground;
-        if (!glass && !forced) { ReleaseSRWLockExclusive(&g_lock); return; }
+        if (!glass && !forced) { chain.processedLast = false; ReleaseSRWLockExclusive(&g_lock); return false; }
 
         ComPtr<ID3D11RenderTargetView> target;
-        if (FAILED(device->CreateRenderTargetView(frame.Get(), nullptr, &target))) { chain.unsupported = true; ReleaseSRWLockExclusive(&g_lock); return; }
-        context->CopyResource(chain.copy.Get(), frame.Get());
+        if (FAILED(device->CreateRenderTargetView(frame.Get(), nullptr, &target))) { chain.unsupported = true; ReleaseSRWLockExclusive(&g_lock); return false; }
+        const bool partialPresent = partial && partial->DirtyRectsCount > 0 && partial->pDirtyRects;
+        const bool scrolled = partial && partial->pScrollRect; // the app moved already-processed pixels itself
+        bool whole = false; // the whole frame is redrawn from the app's own pixels
+        if (partialPresent && !scrolled && chain.sourceValid)
+        {
+            for (UINT i = 0; i < partial->DirtyRectsCount; ++i)
+            {
+                const RECT& r = partial->pDirtyRects[i];
+                const D3D11_BOX box{ UINT(std::clamp<LONG>(r.left, 0, LONG(frameDesc.Width))), UINT(std::clamp<LONG>(r.top, 0, LONG(frameDesc.Height))), 0,
+                    UINT(std::clamp<LONG>(r.right, 0, LONG(frameDesc.Width))), UINT(std::clamp<LONG>(r.bottom, 0, LONG(frameDesc.Height))), 1 };
+                if (box.right > box.left && box.bottom > box.top)
+                    context->CopySubresourceRegion(chain.copy.Get(), 0, box.left, box.top, 0, frame.Get(), 0, &box);
+            }
+            whole = true;
+        }
+        else
+        {
+            context->CopyResource(chain.copy.Get(), frame.Get());
+            // A full present, or a partial one over a frame left as the app drew it: the copy is all the app's own.
+            chain.sourceValid = !scrolled && (!partialPresent || !chain.processedLast);
+            whole = chain.sourceValid;
+        }
+        chain.processedLast = true;
         const Tuning& tuning = CurrentTuning();
         Params params{ { chain.background[0], chain.background[1], chain.background[2] }, tuning.floor };
         params.gain = tuning.gain;
@@ -652,7 +695,7 @@ float4 PS(float4 position : SV_Position) : SV_Target
         context->PSSetShader(resources.ps.Get(), nullptr, 0);
         context->PSSetShaderResources(0, 1, chain.copyView.GetAddressOf());
         context->PSSetConstantBuffers(0, 1, resources.params.GetAddressOf());
-        if (partial && partial->DirtyRectsCount > 0 && partial->pDirtyRects)
+        if (partialPresent && !whole)
         {
             context->RSSetState(resources.scissored.Get());
             for (UINT first = 0; first < partial->DirtyRectsCount; first += D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE)
@@ -671,7 +714,13 @@ float4 PS(float4 position : SV_Position) : SV_Target
         context->PSSetShaderResources(0, 1, &none);
         context->OMSetRenderTargets(0, nullptr, nullptr);
         context1->SwapDeviceContextState(previous.Get(), nullptr);
+        // Settings changed (root or not, tint, keep areas): pixels outside the dirty rectangles changed too, so the
+        // present must tell DWM the whole frame is new.
+        const bool changed = !chain.haveLastParams || memcmp(&params, &chain.lastParams, sizeof params) != 0;
+        chain.lastParams = params;
+        chain.haveLastParams = true;
         ReleaseSRWLockExclusive(&g_lock);
+        return whole && partialPresent && changed;
     }
 
     HRESULT STDMETHODCALLTYPE Hook_Present(IDXGISwapChain* swapChain, UINT sync, UINT flags)
@@ -682,7 +731,11 @@ float4 PS(float4 position : SV_Position) : SV_Target
 
     HRESULT STDMETHODCALLTYPE Hook_Present1(IDXGISwapChain1* swapChain, UINT sync, UINT flags, const DXGI_PRESENT_PARAMETERS* parameters)
     {
-        Process(swapChain, flags, parameters);
+        if (Process(swapChain, flags, parameters))
+        {
+            DXGI_PRESENT_PARAMETERS whole{};
+            return Real_Present1(swapChain, sync, flags, &whole);
+        }
         return Real_Present1(swapChain, sync, flags, parameters);
     }
 
